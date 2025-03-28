@@ -175,7 +175,7 @@ def main():
         if current_text is None:
             print("RT_RCDATA(ID=101) が存在しないか、読み込みに失敗しました。")
         else:
-            print("【既存リソースの内容】")
+            # print("【既存リソースの内容】")
             print(current_text)
 
     elif mode == "write":
