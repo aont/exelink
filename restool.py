@@ -3,9 +3,7 @@ import ctypes
 import subprocess
 from ctypes import wintypes
 
-#
-# 共有で使用する定数／関数／WinAPI定義
-#
+# 定数
 RT_RCDATA = 10
 LOAD_LIBRARY_AS_DATAFILE = 0x00000002
 
@@ -15,41 +13,42 @@ SUBLANG_NEUTRAL = 0x00
 def MAKELANGID(primary, sublang):
     return (sublang << 10) | primary
 
-def MAKEINTRESOURCE(i):
-    return ctypes.cast(ctypes.c_void_p(i), wintypes.LPCWSTR)
+# ANSI版の MAKEINTRESOURCE
+def MAKEINTRESOURCEA(i):
+    return ctypes.cast(ctypes.c_void_p(i), wintypes.LPCSTR)
 
-# -- 書き込み(更新)に使用する WinAPI ---
-BeginUpdateResource = ctypes.windll.kernel32.BeginUpdateResourceW
-BeginUpdateResource.argtypes = (wintypes.LPCWSTR, wintypes.BOOL)
+# ANSI版 API（書き込み用）
+BeginUpdateResource = ctypes.windll.kernel32.BeginUpdateResourceA
+BeginUpdateResource.argtypes = (wintypes.LPCSTR, wintypes.BOOL)
 BeginUpdateResource.restype = wintypes.HANDLE
 
-UpdateResource = ctypes.windll.kernel32.UpdateResourceW
+UpdateResource = ctypes.windll.kernel32.UpdateResourceA
 UpdateResource.argtypes = (
     wintypes.HANDLE,
-    wintypes.LPCWSTR,
-    wintypes.LPCWSTR,
+    wintypes.LPCSTR,
+    wintypes.LPCSTR,
     wintypes.WORD,
     wintypes.LPVOID,
     ctypes.c_size_t
 )
 UpdateResource.restype = wintypes.BOOL
 
-EndUpdateResource = ctypes.windll.kernel32.EndUpdateResourceW
+EndUpdateResource = ctypes.windll.kernel32.EndUpdateResourceA
 EndUpdateResource.argtypes = (wintypes.HANDLE, wintypes.BOOL)
 EndUpdateResource.restype = wintypes.BOOL
 
-# -- 読み込みに使用する WinAPI ---
-LoadLibraryExW = ctypes.windll.kernel32.LoadLibraryExW
-LoadLibraryExW.argtypes = (wintypes.LPCWSTR, wintypes.HANDLE, wintypes.DWORD)
-LoadLibraryExW.restype = wintypes.HMODULE
+# ANSI版 API（読み込み用も統一）
+LoadLibraryEx = ctypes.windll.kernel32.LoadLibraryExA
+LoadLibraryEx.argtypes = (wintypes.LPCSTR, wintypes.HANDLE, wintypes.DWORD)
+LoadLibraryEx.restype = wintypes.HMODULE
 
-FindResourceW = ctypes.windll.kernel32.FindResourceW
-FindResourceW.argtypes = (wintypes.HMODULE, wintypes.LPCWSTR, wintypes.LPCWSTR)
-FindResourceW.restype = wintypes.HANDLE  # HRSRC
+FindResource = ctypes.windll.kernel32.FindResourceA
+FindResource.argtypes = (wintypes.HMODULE, wintypes.LPCSTR, wintypes.LPCSTR)
+FindResource.restype = wintypes.HANDLE
 
 LoadResource = ctypes.windll.kernel32.LoadResource
 LoadResource.argtypes = (wintypes.HMODULE, wintypes.HANDLE)
-LoadResource.restype = wintypes.HANDLE  # HGLOBAL
+LoadResource.restype = wintypes.HANDLE
 
 LockResource = ctypes.windll.kernel32.LockResource
 LockResource.argtypes = (wintypes.HANDLE,)
@@ -63,67 +62,55 @@ FreeLibrary = ctypes.windll.kernel32.FreeLibrary
 FreeLibrary.argtypes = (wintypes.HMODULE,)
 FreeLibrary.restype = wintypes.BOOL
 
-# エラーコード取得
 GetLastError = ctypes.windll.kernel32.GetLastError
 GetLastError.restype = wintypes.DWORD
 
 #
-# 1) EXEのリソースにデータを書き込む関数
+# リソース書き込み
 #
 def write_rcdata_to_exe(target_exe_path: str, argv: list[str], resource_id: int = 101) -> None:
-    """
-    指定 EXE の RT_RCDATA (resource_id) に標準入力から受け取ったバイナリを格納する。
-    """
-    # 標準入力からバイナリを読み取る
     cmdline = subprocess.list2cmdline(argv)
-    # data_to_write = sys.stdin.buffer.read()
-    data_to_write = cmdline.encode() + b'\0'
+    data_to_write = cmdline.encode("mbcs") + b'\0'
     data_size = len(data_to_write)
 
-    # リソース更新開始
-    hUpdate = BeginUpdateResource(target_exe_path, False)
+    exe_path_bytes = target_exe_path.encode("mbcs")
+    hUpdate = BeginUpdateResource(exe_path_bytes, False)
     if not hUpdate:
-        print(f"BeginUpdateResource failed. Error = {GetLastError()}")
+        print(f"BeginUpdateResourceA failed. Error = {GetLastError()}")
         return
 
-    # リソースの更新
     success = UpdateResource(
         hUpdate,
-        MAKEINTRESOURCE(RT_RCDATA),          # RT_RCDATA
-        MAKEINTRESOURCE(resource_id),        # 101番などのリソースID
-        MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL),  # 言語ID
-        data_to_write,                      # 更新データ
-        data_size                           # 更新サイズ(バイト)
+        MAKEINTRESOURCEA(RT_RCDATA),
+        MAKEINTRESOURCEA(resource_id),
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL),
+        data_to_write,
+        data_size
     )
 
     if not success:
-        print(f"UpdateResource failed. Error = {GetLastError()}")
-        # 変更をキャンセルして終了 (fDiscard=True)
+        print(f"UpdateResourceA failed. Error = {GetLastError()}")
         EndUpdateResource(hUpdate, True)
         return
 
-    # コミット (fDiscard=False)
     if not EndUpdateResource(hUpdate, False):
-        print(f"EndUpdateResource failed. Error = {GetLastError()}")
+        print(f"EndUpdateResourceA failed. Error = {GetLastError()}")
         return
 
     print("リソースの更新が完了しました。")
 
 #
-# 2) EXEからRT_RCDATAを読み込む関数
+# リソース読み込み（ANSI API版）
 #
 def read_rcdata_text_from_exe(exe_path: str, resource_id: int = 101) -> str:
-    """
-    指定 exe から RT_RCDATA の指定リソース ID を読み込み、
-    テキストとして解釈し文字列を返す。見つからなければ None。
-    """
-    hModule = LoadLibraryExW(exe_path, None, LOAD_LIBRARY_AS_DATAFILE)
+    exe_path_bytes = exe_path.encode("mbcs")
+    hModule = LoadLibraryEx(exe_path_bytes, None, LOAD_LIBRARY_AS_DATAFILE)
     if not hModule:
         err = GetLastError()
-        raise OSError(f"LoadLibraryExW failed. Error={err}")
+        raise OSError(f"LoadLibraryExA failed. Error={err}")
 
     try:
-        hResInfo = FindResourceW(hModule, MAKEINTRESOURCE(resource_id), MAKEINTRESOURCE(RT_RCDATA))
+        hResInfo = FindResource(hModule, MAKEINTRESOURCEA(resource_id), MAKEINTRESOURCEA(RT_RCDATA))
         if not hResInfo:
             return None
 
@@ -139,26 +126,19 @@ def read_rcdata_text_from_exe(exe_path: str, resource_id: int = 101) -> str:
         if not pResource:
             return None
 
-        # pResource をバイナリとして取り出す
         data_pointer = ctypes.cast(pResource, ctypes.POINTER(ctypes.c_char * size))
         raw_data = data_pointer.contents
         byte_data = bytes(raw_data)
 
-        # 文字コードは exe 内部にどう格納するかにもよる
-        # 例: shift_jis / utf-16-le / etc
-        # デコードの仕方は必要に応じて変えてください
         text = byte_data.decode(errors='replace')
-
-        # リソースに null 終端が入っている場合は末尾の '\x00' を削除
         text = text.rstrip('\x00')
         return text
 
     finally:
         FreeLibrary(hModule)
 
-
 #
-# メイン処理: コマンドライン引数で read / write を切り替え
+# メイン
 #
 def main():
     if len(sys.argv) < 3:
@@ -175,7 +155,6 @@ def main():
         if current_text is None:
             print("RT_RCDATA(ID=101) が存在しないか、読み込みに失敗しました。")
         else:
-            # print("【既存リソースの内容】")
             print(current_text)
 
     elif mode == "write":
