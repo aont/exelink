@@ -218,5 +218,6 @@ int mainCRTStartup(void)
     GetExitCodeProcess(processInfo.hProcess, &exitCode);
     CloseHandle(processInfo.hProcess);
     CloseHandle(processInfo.hThread);
+    ExitProcess(exitCode);
     return (int)exitCode;
 }
