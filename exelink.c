@@ -41,7 +41,6 @@ static VOID OutputErrorMessageW(LPCWSTR pMessage)
 
 //----------------------------------------------------------
 // Utility to output an error message with an error code
-//  Note: wsprintfW is in user32.dll and requires user32.lib
 //----------------------------------------------------------
 static VOID OutputErrorMessageWithCode(LPCWSTR pMessage, DWORD errorCode)
 {
@@ -114,32 +113,28 @@ static LPCWSTR ShiftCommandLine(LPCWSTR pCmdLine)
 }
 
 //----------------------------------------------------------
-// Load an embedded resource
+// Load an embedded resource (RT_RCDATA, given id)
 //----------------------------------------------------------
 static INT LoadEmbeddedResource(INT resourceId, LPVOID* ppResourceData, DWORD* pResourceSize)
 {
     HRSRC hResourceInfo = FindResourceW(NULL, MAKEINTRESOURCEW(resourceId), MAKEINTRESOURCEW(RT_RCDATA));
     if (!hResourceInfo) {
-        OutputErrorMessageW(L"Failed to find resource.\r\n");
         return -1;
     }
 
     HGLOBAL hResourceData = LoadResource(NULL, hResourceInfo);
     if (!hResourceData) {
-        OutputErrorMessageW(L"Failed to load resource.\r\n");
         return -1;
     }
 
     DWORD resourceSize = SizeofResource(NULL, hResourceInfo);
     if (resourceSize == 0) {
-        OutputErrorMessageW(L"Resource size is zero.\r\n");
         return -1;
     }
     *pResourceSize = resourceSize;
 
     LPVOID pLockRes = LockResource(hResourceData);
     if (!pLockRes) {
-        OutputErrorMessageW(L"Failed to lock resource.\r\n");
         return -1;
     }
     *ppResourceData = pLockRes;
@@ -148,15 +143,129 @@ static INT LoadEmbeddedResource(INT resourceId, LPVOID* ppResourceData, DWORD* p
 }
 
 //----------------------------------------------------------
+// Apply environment variables from UTF-16 text resource.
+// Format:
+//   - Lines separated by \n or \r\n
+//   - Ignore empty lines and lines starting with '#'
+//   - "NAME=VALUE" sets variable
+//   - "NAME" (no '=') unsets variable
+//----------------------------------------------------------
+static VOID ApplyEnvironmentFromResource(LPCWSTR pText, SIZE_T cchText)
+{
+    SIZE_T i = 0;
+
+    while (i < cchText) {
+        // Skip leading CR/LF
+        while (i < cchText && (pText[i] == L'\r' || pText[i] == L'\n')) {
+            i++;
+        }
+        if (i >= cchText) {
+            break;
+        }
+
+        // Line start
+        SIZE_T lineStart = i;
+
+        // Find line end
+        while (i < cchText && pText[i] != L'\r' && pText[i] != L'\n') {
+            i++;
+        }
+        SIZE_T lineEnd = i;
+
+        // Trim trailing spaces/tabs (optional; keep minimal)
+        while (lineEnd > lineStart && (pText[lineEnd - 1] == L' ' || pText[lineEnd - 1] == L'\t')) {
+            lineEnd--;
+        }
+
+        // Trim leading spaces/tabs
+        while (lineStart < lineEnd && (pText[lineStart] == L' ' || pText[lineStart] == L'\t')) {
+            lineStart++;
+        }
+
+        if (lineStart >= lineEnd) {
+            continue;
+        }
+
+        // Comment
+        if (pText[lineStart] == L'#') {
+            continue;
+        }
+
+        // Find '='
+        SIZE_T eq = lineStart;
+        while (eq < lineEnd && pText[eq] != L'=') {
+            eq++;
+        }
+
+        if (eq == lineEnd) {
+            // No '=' => unset variable
+            // Name is [lineStart, lineEnd)
+            WCHAR nameBuf[256];
+            SIZE_T nameLen = lineEnd - lineStart;
+            if (nameLen >= (sizeof(nameBuf) / sizeof(nameBuf[0]))) {
+                // too long; ignore
+                continue;
+            }
+            memcpy(nameBuf, pText + lineStart, nameLen * sizeof(WCHAR));
+            nameBuf[nameLen] = L'\0';
+            SetEnvironmentVariableW(nameBuf, NULL);
+        } else {
+            // Has '=' => set variable (value may be empty)
+            WCHAR nameBuf[256];
+            SIZE_T nameLen = eq - lineStart;
+            if (nameLen == 0 || nameLen >= (sizeof(nameBuf) / sizeof(nameBuf[0]))) {
+                continue;
+            }
+            memcpy(nameBuf, pText + lineStart, nameLen * sizeof(WCHAR));
+            nameBuf[nameLen] = L'\0';
+
+            // Value
+            LPCWSTR valuePtr = pText + (eq + 1);
+            SIZE_T valueLen = lineEnd - (eq + 1);
+
+            // For safety, cap value copy into heap buffer (variable length)
+            HANDLE hHeap = GetProcessHeap();
+            SIZE_T bytes = (valueLen + 1) * sizeof(WCHAR);
+            LPWSTR valueBuf = (LPWSTR)HeapAlloc(hHeap, HEAP_ZERO_MEMORY, bytes);
+            if (!valueBuf) {
+                continue;
+            }
+            if (valueLen > 0) {
+                memcpy(valueBuf, valuePtr, valueLen * sizeof(WCHAR));
+            }
+            valueBuf[valueLen] = L'\0';
+
+            SetEnvironmentVariableW(nameBuf, valueBuf);
+            HeapFree(hHeap, 0, valueBuf);
+        }
+    }
+}
+
+//----------------------------------------------------------
 // Entry point
 //----------------------------------------------------------
 int mainCRTStartup(void)
 {
-    LPVOID pResource = NULL;
+    // --- Load command prefix (required) ---
+    LPVOID pPrefixResource = NULL;
     DWORD prefixLength = 0;
-    if (LoadEmbeddedResource(101, &pResource, &prefixLength) != 0) {
-        OutputErrorMessageW(L"LoadEmbeddedResource failed.\r\n");
+    if (LoadEmbeddedResource(101, &pPrefixResource, &prefixLength) != 0) {
+        OutputErrorMessageW(L"LoadEmbeddedResource(101) failed.\r\n");
         return -1;
+    }
+
+    // --- Load env resource (optional) ---
+    LPVOID pEnvResource = NULL;
+    DWORD envBytes = 0;
+    if (LoadEmbeddedResource(102, &pEnvResource, &envBytes) == 0 && envBytes >= sizeof(WCHAR)) {
+        // Apply env vars before CreateProcess (child inherits)
+        LPCWSTR pEnvText = (LPCWSTR)pEnvResource;
+        SIZE_T cch = (SIZE_T)(envBytes / sizeof(WCHAR));
+        // strip possible trailing NULs (optional)
+        while (cch > 0 && pEnvText[cch - 1] == L'\0') {
+            cch--;
+        }
+        ApplyEnvironmentFromResource(pEnvText, cch);
     }
 
     LPCWSTR pCmdLine = GetCommandLineW();
@@ -174,9 +283,7 @@ int mainCRTStartup(void)
         return -1;
     }
 
-    // Using CopyMemory here may introduce a reference to memcpy due to optimization,
-    // so a custom memcpy implementation is used to ensure reliable resolution.
-    memcpy(pNewCmdLineBuffer, pResource, prefixLength);
+    memcpy(pNewCmdLineBuffer, pPrefixResource, prefixLength);
     pNewCmdLineBuffer[prefixLength / sizeof(WCHAR)] = L' ';
     memcpy(
         pNewCmdLineBuffer + (prefixLength / sizeof(WCHAR)) + 1,
@@ -186,8 +293,6 @@ int mainCRTStartup(void)
     pNewCmdLineBuffer[(prefixLength / sizeof(WCHAR)) + 1 + shiftedCmdLineLength] = L'\0';
 
     STARTUPINFOW startupInfo;
-    // ZeroMemory may also introduce a memset reference due to optimization,
-    // so a custom memset implementation is used instead.
     memset(&startupInfo, 0, sizeof(startupInfo));
     startupInfo.cb = sizeof(startupInfo);
 
@@ -216,9 +321,7 @@ int mainCRTStartup(void)
     }
 
     SetConsoleCtrlHandler(NULL, TRUE);
-
     WaitForSingleObject(processInfo.hProcess, INFINITE);
-
     SetConsoleCtrlHandler(NULL, FALSE);
 
     DWORD exitCode = 0;
