@@ -39,9 +39,6 @@ static VOID OutputErrorMessageW(LPCWSTR pMessage)
     WriteFile(hError, pMessage, lstrlenW(pMessage) * sizeof(WCHAR), &written, NULL);
 }
 
-//----------------------------------------------------------
-// Utility to output an error message with an error code
-//----------------------------------------------------------
 static VOID OutputErrorMessageWithCode(LPCWSTR pMessage, DWORD errorCode)
 {
     WCHAR buffer[256];
@@ -118,127 +115,154 @@ static LPCWSTR ShiftCommandLine(LPCWSTR pCmdLine)
 static INT LoadEmbeddedResource(INT resourceId, LPVOID* ppResourceData, DWORD* pResourceSize)
 {
     HRSRC hResourceInfo = FindResourceW(NULL, MAKEINTRESOURCEW(resourceId), MAKEINTRESOURCEW(RT_RCDATA));
-    if (!hResourceInfo) {
-        return -1;
-    }
+    if (!hResourceInfo) return -1;
 
     HGLOBAL hResourceData = LoadResource(NULL, hResourceInfo);
-    if (!hResourceData) {
-        return -1;
-    }
+    if (!hResourceData) return -1;
 
     DWORD resourceSize = SizeofResource(NULL, hResourceInfo);
-    if (resourceSize == 0) {
-        return -1;
-    }
-    *pResourceSize = resourceSize;
+    if (resourceSize == 0) return -1;
 
     LPVOID pLockRes = LockResource(hResourceData);
-    if (!pLockRes) {
-        return -1;
-    }
-    *ppResourceData = pLockRes;
+    if (!pLockRes) return -1;
 
+    *ppResourceData = pLockRes;
+    *pResourceSize = resourceSize;
     return 0;
 }
 
 //----------------------------------------------------------
-// Apply environment variables from UTF-16 text resource.
-// Format:
-//   - Lines separated by \n or \r\n
-//   - Ignore empty lines and lines starting with '#'
-//   - "NAME=VALUE" sets variable
-//   - "NAME" (no '=') unsets variable
+// Config blob helpers (type is UTF-16LE 4-WCHAR == 8 bytes)
 //----------------------------------------------------------
-static VOID ApplyEnvironmentFromResource(LPCWSTR pText, SIZE_T cchText)
+static ULONGLONG ReadU64LE(const BYTE* p)
 {
-    SIZE_T i = 0;
+    return ((ULONGLONG)p[0]) |
+           ((ULONGLONG)p[1] << 8) |
+           ((ULONGLONG)p[2] << 16) |
+           ((ULONGLONG)p[3] << 24) |
+           ((ULONGLONG)p[4] << 32) |
+           ((ULONGLONG)p[5] << 40) |
+           ((ULONGLONG)p[6] << 48) |
+           ((ULONGLONG)p[7] << 56);
+}
 
-    while (i < cchText) {
-        // Skip leading CR/LF
-        while (i < cchText && (pText[i] == L'\r' || pText[i] == L'\n')) {
-            i++;
-        }
-        if (i >= cchText) {
-            break;
-        }
-
-        // Line start
-        SIZE_T lineStart = i;
-
-        // Find line end
-        while (i < cchText && pText[i] != L'\r' && pText[i] != L'\n') {
-            i++;
-        }
-        SIZE_T lineEnd = i;
-
-        // Trim trailing spaces/tabs (optional; keep minimal)
-        while (lineEnd > lineStart && (pText[lineEnd - 1] == L' ' || pText[lineEnd - 1] == L'\t')) {
-            lineEnd--;
-        }
-
-        // Trim leading spaces/tabs
-        while (lineStart < lineEnd && (pText[lineStart] == L' ' || pText[lineStart] == L'\t')) {
-            lineStart++;
-        }
-
-        if (lineStart >= lineEnd) {
-            continue;
-        }
-
-        // Comment
-        if (pText[lineStart] == L'#') {
-            continue;
-        }
-
-        // Find '='
-        SIZE_T eq = lineStart;
-        while (eq < lineEnd && pText[eq] != L'=') {
-            eq++;
-        }
-
-        if (eq == lineEnd) {
-            // No '=' => unset variable
-            // Name is [lineStart, lineEnd)
-            WCHAR nameBuf[256];
-            SIZE_T nameLen = lineEnd - lineStart;
-            if (nameLen >= (sizeof(nameBuf) / sizeof(nameBuf[0]))) {
-                // too long; ignore
-                continue;
-            }
-            memcpy(nameBuf, pText + lineStart, nameLen * sizeof(WCHAR));
-            nameBuf[nameLen] = L'\0';
-            SetEnvironmentVariableW(nameBuf, NULL);
-        } else {
-            // Has '=' => set variable (value may be empty)
-            WCHAR nameBuf[256];
-            SIZE_T nameLen = eq - lineStart;
-            if (nameLen == 0 || nameLen >= (sizeof(nameBuf) / sizeof(nameBuf[0]))) {
-                continue;
-            }
-            memcpy(nameBuf, pText + lineStart, nameLen * sizeof(WCHAR));
-            nameBuf[nameLen] = L'\0';
-
-            // Value
-            LPCWSTR valuePtr = pText + (eq + 1);
-            SIZE_T valueLen = lineEnd - (eq + 1);
-
-            // For safety, cap value copy into heap buffer (variable length)
-            HANDLE hHeap = GetProcessHeap();
-            SIZE_T bytes = (valueLen + 1) * sizeof(WCHAR);
-            LPWSTR valueBuf = (LPWSTR)HeapAlloc(hHeap, HEAP_ZERO_MEMORY, bytes);
-            if (!valueBuf) {
-                continue;
-            }
-            if (valueLen > 0) {
-                memcpy(valueBuf, valuePtr, valueLen * sizeof(WCHAR));
-            }
-            valueBuf[valueLen] = L'\0';
-
-            SetEnvironmentVariableW(nameBuf, valueBuf);
-            HeapFree(hHeap, 0, valueBuf);
-        }
+static BOOL TypeEquals8(const BYTE* p, const BYTE t[8])
+{
+    for (int i = 0; i < 8; i++) {
+        if (p[i] != t[i]) return FALSE;
     }
+    return TRUE;
+}
+
+#define MAX_CMDLINE_WCHARS 32767
+#define MAX_ENV_KEY_WCHARS 256
+#define MAX_ENV_VAL_WCHARS 32767
+
+static INT ParseConfigBlobApplyEnvAndGetArgvPrefix(
+    const BYTE* pData,
+    DWORD dataSize,
+    const BYTE** ppArgvPrefixBytes,
+    DWORD* pArgvPrefixByteLen
+)
+{
+    // UTF-16LE, 4 WCHAR each:
+    // "ARGV" -> A\0 R\0 G\0 V\0
+    // "ENV\0" -> E\0 N\0 V\0 \0\0
+    // "END\0" -> E\0 N\0 D\0 \0\0
+    static const BYTE TYPE_ARGV[8] = { 'A',0,'R',0,'G',0,'V',0 };
+    static const BYTE TYPE_ENV[8]  = { 'E',0,'N',0,'V',0, 0,0 };
+    static const BYTE TYPE_END[8]  = { 'E',0,'N',0,'D',0, 0,0 };
+
+    const BYTE* p = pData;
+    ULONGLONG remaining = (ULONGLONG)dataSize;
+
+    BOOL hasArgv = FALSE;
+    *ppArgvPrefixBytes = NULL;
+    *pArgvPrefixByteLen = 0;
+
+    while (remaining >= 8) {
+        const BYTE* pType = p;
+        p += 8; remaining -= 8;
+
+        if (TypeEquals8(pType, TYPE_END)) {
+            return hasArgv ? 0 : -1;
+        }
+
+        if (TypeEquals8(pType, TYPE_ARGV)) {
+            if (remaining < 8) return -1;
+            ULONGLONG len = ReadU64LE(p);
+            p += 8; remaining -= 8;
+
+            if (len > remaining) return -1;
+            if ((len % 2) != 0) return -1; // UTF-16LE bytes
+
+            ULONGLONG wchars = len / 2;
+            if (wchars == 0 || wchars > MAX_CMDLINE_WCHARS) return -1;
+
+            *ppArgvPrefixBytes = p;
+            *pArgvPrefixByteLen = (DWORD)len;
+            hasArgv = TRUE;
+
+            p += (SIZE_T)len;
+            remaining -= len;
+            continue;
+        }
+
+        if (TypeEquals8(pType, TYPE_ENV)) {
+            if (remaining < 8) return -1;
+            ULONGLONG klen = ReadU64LE(p);
+            p += 8; remaining -= 8;
+
+            if (klen > remaining) return -1;
+            if ((klen % 2) != 0) return -1;
+
+            ULONGLONG kchars = klen / 2;
+            if (kchars == 0 || kchars >= MAX_ENV_KEY_WCHARS) return -1;
+
+            WCHAR keyBuf[MAX_ENV_KEY_WCHARS];
+            memcpy(keyBuf, p, (SIZE_T)klen);
+            keyBuf[(SIZE_T)kchars] = L'\0';
+
+            p += (SIZE_T)klen;
+            remaining -= klen;
+
+            if (remaining < 8) return -1;
+            ULONGLONG vlen = ReadU64LE(p);
+            p += 8; remaining -= 8;
+
+            if (vlen > remaining) return -1;
+            if ((vlen % 2) != 0) return -1;
+
+            // vlen==0 => set empty string (NOT unset)
+            if (vlen == 0) {
+                SetEnvironmentVariableW(keyBuf, L"");
+            } else {
+                ULONGLONG vchars = vlen / 2;
+                if (vchars > MAX_ENV_VAL_WCHARS) return -1;
+
+                HANDLE hHeap = GetProcessHeap();
+                SIZE_T bytes = (SIZE_T)vlen + sizeof(WCHAR);
+                LPWSTR valueBuf = (LPWSTR)HeapAlloc(hHeap, HEAP_ZERO_MEMORY, bytes);
+                if (!valueBuf) return -1;
+
+                memcpy(valueBuf, p, (SIZE_T)vlen);
+                valueBuf[(SIZE_T)vchars] = L'\0';
+
+                SetEnvironmentVariableW(keyBuf, valueBuf);
+                HeapFree(hHeap, 0, valueBuf);
+            }
+
+            p += (SIZE_T)vlen;
+            remaining -= vlen;
+            continue;
+        }
+
+        // Unknown type => fail
+        return -1;
+    }
+
+    // No END
+    return -1;
 }
 
 //----------------------------------------------------------
@@ -246,35 +270,32 @@ static VOID ApplyEnvironmentFromResource(LPCWSTR pText, SIZE_T cchText)
 //----------------------------------------------------------
 int mainCRTStartup(void)
 {
-    // --- Load command prefix (required) ---
-    LPVOID pPrefixResource = NULL;
-    DWORD prefixLength = 0;
-    if (LoadEmbeddedResource(101, &pPrefixResource, &prefixLength) != 0) {
+    LPVOID pConfigResource = NULL;
+    DWORD configSize = 0;
+    if (LoadEmbeddedResource(101, &pConfigResource, &configSize) != 0) {
         OutputErrorMessageW(L"LoadEmbeddedResource(101) failed.\r\n");
         return -1;
     }
 
-    // --- Load env resource (optional) ---
-    LPVOID pEnvResource = NULL;
-    DWORD envBytes = 0;
-    if (LoadEmbeddedResource(102, &pEnvResource, &envBytes) == 0 && envBytes >= sizeof(WCHAR)) {
-        // Apply env vars before CreateProcess (child inherits)
-        LPCWSTR pEnvText = (LPCWSTR)pEnvResource;
-        SIZE_T cch = (SIZE_T)(envBytes / sizeof(WCHAR));
-        // strip possible trailing NULs (optional)
-        while (cch > 0 && pEnvText[cch - 1] == L'\0') {
-            cch--;
-        }
-        ApplyEnvironmentFromResource(pEnvText, cch);
+    const BYTE* pArgvPrefixBytes = NULL;
+    DWORD argvPrefixByteLen = 0;
+
+    if (ParseConfigBlobApplyEnvAndGetArgvPrefix(
+            (const BYTE*)pConfigResource,
+            configSize,
+            &pArgvPrefixBytes,
+            &argvPrefixByteLen
+        ) != 0) {
+        OutputErrorMessageW(L"ParseConfigBlob failed (invalid config blob).\r\n");
+        return -1;
     }
 
     LPCWSTR pCmdLine = GetCommandLineW();
     LPCWSTR pShiftedCmdLine = ShiftCommandLine(pCmdLine);
     SIZE_T shiftedCmdLineLength = (SIZE_T)lstrlenW(pShiftedCmdLine);
 
-    // prefix (UTF-16) + space + shifted command line + NUL
     SIZE_T newCmdLineSize =
-        (SIZE_T)prefixLength + sizeof(WCHAR) + shiftedCmdLineLength * sizeof(WCHAR) + sizeof(WCHAR);
+        (SIZE_T)argvPrefixByteLen + sizeof(WCHAR) + shiftedCmdLineLength * sizeof(WCHAR) + sizeof(WCHAR);
 
     HANDLE hProcessHeap = GetProcessHeap();
     LPWSTR pNewCmdLineBuffer = (LPWSTR)HeapAlloc(hProcessHeap, HEAP_ZERO_MEMORY, newCmdLineSize);
@@ -283,14 +304,14 @@ int mainCRTStartup(void)
         return -1;
     }
 
-    memcpy(pNewCmdLineBuffer, pPrefixResource, prefixLength);
-    pNewCmdLineBuffer[prefixLength / sizeof(WCHAR)] = L' ';
+    memcpy(pNewCmdLineBuffer, pArgvPrefixBytes, argvPrefixByteLen);
+    pNewCmdLineBuffer[argvPrefixByteLen / sizeof(WCHAR)] = L' ';
     memcpy(
-        pNewCmdLineBuffer + (prefixLength / sizeof(WCHAR)) + 1,
+        pNewCmdLineBuffer + (argvPrefixByteLen / sizeof(WCHAR)) + 1,
         pShiftedCmdLine,
         shiftedCmdLineLength * sizeof(WCHAR)
     );
-    pNewCmdLineBuffer[(prefixLength / sizeof(WCHAR)) + 1 + shiftedCmdLineLength] = L'\0';
+    pNewCmdLineBuffer[(argvPrefixByteLen / sizeof(WCHAR)) + 1 + shiftedCmdLineLength] = L'\0';
 
     STARTUPINFOW startupInfo;
     memset(&startupInfo, 0, sizeof(startupInfo));
