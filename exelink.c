@@ -1,7 +1,33 @@
 #include <windows.h>
 
 //----------------------------------------------------------
-// 標準エラーに文字列を出力するためのユーティリティ (Wide版)
+// Minimal memcpy / memset implementations to eliminate CRT
+//----------------------------------------------------------
+#pragma function(memcpy)
+#pragma function(memset)
+
+void* __cdecl memcpy(void* dst, const void* src, size_t n)
+{
+    unsigned char* d = (unsigned char*)dst;
+    const unsigned char* s = (const unsigned char*)src;
+    while (n--) {
+        *d++ = *s++;
+    }
+    return dst;
+}
+
+void* __cdecl memset(void* dst, int c, size_t n)
+{
+    unsigned char* d = (unsigned char*)dst;
+    unsigned char v = (unsigned char)c;
+    while (n--) {
+        *d++ = v;
+    }
+    return dst;
+}
+
+//----------------------------------------------------------
+// Utility to output a wide string to standard error
 //----------------------------------------------------------
 static VOID OutputErrorMessageW(LPCWSTR pMessage)
 {
@@ -14,7 +40,8 @@ static VOID OutputErrorMessageW(LPCWSTR pMessage)
 }
 
 //----------------------------------------------------------
-// エラーコードを表示するためのユーティリティ
+// Utility to output an error message with an error code
+//  Note: wsprintfW is in user32.dll and requires user32.lib
 //----------------------------------------------------------
 static VOID OutputErrorMessageWithCode(LPCWSTR pMessage, DWORD errorCode)
 {
@@ -24,7 +51,7 @@ static VOID OutputErrorMessageWithCode(LPCWSTR pMessage, DWORD errorCode)
 }
 
 //----------------------------------------------------------
-// argv[0] 部分を読み飛ばしてコマンドラインを返す
+// Skip argv[0] and return the remaining command line
 //----------------------------------------------------------
 static LPCWSTR ShiftCommandLine(LPCWSTR pCmdLine)
 {
@@ -87,7 +114,7 @@ static LPCWSTR ShiftCommandLine(LPCWSTR pCmdLine)
 }
 
 //----------------------------------------------------------
-// リソースの読み込み
+// Load an embedded resource
 //----------------------------------------------------------
 static INT LoadEmbeddedResource(INT resourceId, LPVOID* ppResourceData, DWORD* pResourceSize)
 {
@@ -121,7 +148,7 @@ static INT LoadEmbeddedResource(INT resourceId, LPVOID* ppResourceData, DWORD* p
 }
 
 //----------------------------------------------------------
-// エントリーポイント
+// Entry point
 //----------------------------------------------------------
 int mainCRTStartup(void)
 {
@@ -136,18 +163,22 @@ int mainCRTStartup(void)
     LPCWSTR pShiftedCmdLine = ShiftCommandLine(pCmdLine);
     SIZE_T shiftedCmdLineLength = (SIZE_T)lstrlenW(pShiftedCmdLine);
 
-    SIZE_T newCmdLineSize = prefixLength + sizeof(WCHAR) + shiftedCmdLineLength * sizeof(WCHAR) + sizeof(WCHAR);
+    // prefix (UTF-16) + space + shifted command line + NUL
+    SIZE_T newCmdLineSize =
+        (SIZE_T)prefixLength + sizeof(WCHAR) + shiftedCmdLineLength * sizeof(WCHAR) + sizeof(WCHAR);
+
     HANDLE hProcessHeap = GetProcessHeap();
     LPWSTR pNewCmdLineBuffer = (LPWSTR)HeapAlloc(hProcessHeap, HEAP_ZERO_MEMORY, newCmdLineSize);
-
     if (!pNewCmdLineBuffer) {
         OutputErrorMessageW(L"HeapAlloc failed.\r\n");
         return -1;
     }
 
-    CopyMemory(pNewCmdLineBuffer, pResource, prefixLength);
+    // Using CopyMemory here may introduce a reference to memcpy due to optimization,
+    // so a custom memcpy implementation is used to ensure reliable resolution.
+    memcpy(pNewCmdLineBuffer, pResource, prefixLength);
     pNewCmdLineBuffer[prefixLength / sizeof(WCHAR)] = L' ';
-    CopyMemory(
+    memcpy(
         pNewCmdLineBuffer + (prefixLength / sizeof(WCHAR)) + 1,
         pShiftedCmdLine,
         shiftedCmdLineLength * sizeof(WCHAR)
@@ -155,11 +186,13 @@ int mainCRTStartup(void)
     pNewCmdLineBuffer[(prefixLength / sizeof(WCHAR)) + 1 + shiftedCmdLineLength] = L'\0';
 
     STARTUPINFOW startupInfo;
-    ZeroMemory(&startupInfo, sizeof(startupInfo));
+    // ZeroMemory may also introduce a memset reference due to optimization,
+    // so a custom memset implementation is used instead.
+    memset(&startupInfo, 0, sizeof(startupInfo));
     startupInfo.cb = sizeof(startupInfo);
 
     PROCESS_INFORMATION processInfo;
-    ZeroMemory(&processInfo, sizeof(processInfo));
+    memset(&processInfo, 0, sizeof(processInfo));
 
     BOOL isSuccess = CreateProcessW(
         NULL,
@@ -192,6 +225,7 @@ int mainCRTStartup(void)
     GetExitCodeProcess(processInfo.hProcess, &exitCode);
     CloseHandle(processInfo.hProcess);
     CloseHandle(processInfo.hThread);
+
     ExitProcess(exitCode);
     return (int)exitCode;
 }

@@ -7,7 +7,7 @@ import gzip
 import ctypes.wintypes
 
 #
-# 共有で使用する定数／関数／WinAPI定義
+# Shared constants / functions / WinAPI definitions
 #
 RT_RCDATA = 10
 LOAD_LIBRARY_AS_DATAFILE = 0x00000002
@@ -21,7 +21,7 @@ def MAKELANGID(primary, sublang):
 def MAKEINTRESOURCE(i):
     return ctypes.cast(ctypes.c_void_p(i), ctypes.wintypes.LPCWSTR)
 
-# -- 書き込み(更新)に使用する WinAPI ---
+# -- WinAPI used for writing (updating) resources ---
 BeginUpdateResource = ctypes.windll.kernel32.BeginUpdateResourceW
 BeginUpdateResource.argtypes = (ctypes.wintypes.LPCWSTR, ctypes.wintypes.BOOL)
 BeginUpdateResource.restype = ctypes.wintypes.HANDLE
@@ -41,7 +41,7 @@ EndUpdateResource = ctypes.windll.kernel32.EndUpdateResourceW
 EndUpdateResource.argtypes = (ctypes.wintypes.HANDLE, ctypes.wintypes.BOOL)
 EndUpdateResource.restype = ctypes.wintypes.BOOL
 
-# -- 読み込みに使用する WinAPI ---
+# -- WinAPI used for reading resources ---
 LoadLibraryExW = ctypes.windll.kernel32.LoadLibraryExW
 LoadLibraryExW.argtypes = (ctypes.wintypes.LPCWSTR, ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD)
 LoadLibraryExW.restype = ctypes.wintypes.HMODULE
@@ -66,58 +66,60 @@ FreeLibrary = ctypes.windll.kernel32.FreeLibrary
 FreeLibrary.argtypes = (ctypes.wintypes.HMODULE,)
 FreeLibrary.restype = ctypes.wintypes.BOOL
 
-# エラーコード取得
+# Get last error code
 GetLastError = ctypes.windll.kernel32.GetLastError
 GetLastError.restype = ctypes.wintypes.DWORD
 
 #
-# 1) EXEのリソースにデータを書き込む関数
+# 1) Function to write data into an EXE resource
 #
 def write_rcdata_to_exe(target_exe_path: str, argv: list[str], resource_id: int = 101) -> None:
     """
-    指定 EXE の RT_RCDATA (resource_id) に標準入力から受け取ったバイナリを格納する。
+    Store binary data received from standard input into the specified EXE's
+    RT_RCDATA resource (resource_id).
     """
-    # 標準入力からバイナリを読み取る
+    # Read binary data from standard input
     cmdline = subprocess.list2cmdline(argv)
     data_to_write = cmdline.encode("utf-16-le")
     data_size = len(data_to_write)
 
-    # リソース更新開始
+    # Begin resource update
     hUpdate = BeginUpdateResource(target_exe_path, False)
     if not hUpdate:
         print(f"BeginUpdateResource failed. Error = {GetLastError()}")
         return
 
-    # リソースの更新
+    # Update the resource
     success = UpdateResource(
         hUpdate,
         MAKEINTRESOURCE(RT_RCDATA),          # RT_RCDATA
-        MAKEINTRESOURCE(resource_id),        # 101番などのリソースID
-        MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL),  # 言語ID
-        data_to_write,                      # 更新データ
-        data_size                           # 更新サイズ(バイト)
+        MAKEINTRESOURCE(resource_id),        # Resource ID such as 101
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL),  # Language ID
+        data_to_write,                      # Data to write
+        data_size                           # Size of data (bytes)
     )
 
     if not success:
         print(f"UpdateResource failed. Error = {GetLastError()}")
-        # 変更をキャンセルして終了 (fDiscard=True)
+        # Cancel changes and exit (fDiscard=True)
         EndUpdateResource(hUpdate, True)
         return
 
-    # コミット (fDiscard=False)
+    # Commit changes (fDiscard=False)
     if not EndUpdateResource(hUpdate, False):
         print(f"EndUpdateResource failed. Error = {GetLastError()}")
         return
 
-    # print("リソースの更新が完了しました。")
+    # print("Resource update completed.")
 
 #
-# 2) EXEからRT_RCDATAを読み込む関数
+# 2) Function to read RT_RCDATA from an EXE
 #
 def read_rcdata_text_from_exe(exe_path: str, resource_id: int = 101) -> str:
     """
-    指定 exe から RT_RCDATA の指定リソース ID を読み込み、
-    テキストとして解釈し文字列を返す。見つからなければ None。
+    Read the specified RT_RCDATA resource ID from the given EXE,
+    interpret it as text, and return it as a string.
+    Returns None if not found.
     """
     hModule = LoadLibraryExW(exe_path, None, LOAD_LIBRARY_AS_DATAFILE)
     if not hModule:
@@ -141,17 +143,17 @@ def read_rcdata_text_from_exe(exe_path: str, resource_id: int = 101) -> str:
         if not pResource:
             return None
 
-        # pResource をバイナリとして取り出す
+        # Extract pResource as binary data
         data_pointer = ctypes.cast(pResource, ctypes.POINTER(ctypes.c_char * size))
         raw_data = data_pointer.contents
         byte_data = bytes(raw_data)
 
-        # 文字コードは exe 内部にどう格納するかにもよる
-        # 例: shift_jis / utf-16-le / etc
-        # デコードの仕方は必要に応じて変えてください
+        # Character encoding depends on how data is stored in the EXE
+        # Examples: shift_jis / utf-16-le / etc.
+        # Adjust decoding as needed
         text = byte_data.decode("utf-16-le")
 
-        # リソースに null 終端が入っている場合は末尾の '\x00' を削除
+        # Remove trailing '\x00' if the resource contains a null terminator
         text = text.rstrip('\x00')
         return text
 
@@ -160,7 +162,7 @@ def read_rcdata_text_from_exe(exe_path: str, resource_id: int = 101) -> str:
 
 
 #
-# メイン処理: コマンドライン引数で read / write を切り替え
+# Main logic: switch between read / write via command-line arguments
 #
 def main():
     if len(sys.argv) < 3:
@@ -175,9 +177,9 @@ def main():
     if mode == "read":
         current_text = read_rcdata_text_from_exe(exe_path, resource_id=101)
         if current_text is None:
-            print("RT_RCDATA(ID=101) が存在しないか、読み込みに失敗しました。")
+            print("RT_RCDATA (ID=101) does not exist or failed to read.")
         else:
-            # print("【既存リソースの内容】")
+            # print("[Existing resource content]")
             print(current_text)
 
     elif mode == "write":
@@ -191,11 +193,11 @@ def main():
         write_rcdata_to_exe(exe_path, argv_prefix, resource_id=101)
 
     else:
-        print(f"不明なコマンド: {mode}")
-        print("read または write を指定してください。")
+        print(f"Unknown command: {mode}")
+        print("Please specify 'read' or 'write'.")
         sys.exit(1)
 
-exelink_bin = gzip.decompress(base64.b64decode("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"))
+exelink_bin = gzip.decompress(base64.b64decode("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"))
 
 if __name__ == "__main__":
     main()
