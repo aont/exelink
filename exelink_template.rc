@@ -1,0 +1,4 @@
+#include <windows.h>
+#include "exelink_config.h"
+
+EXELINK_CONFIG_RESOURCE_ID RCDATA "empty_config.bin"

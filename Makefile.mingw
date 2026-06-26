@@ -1,0 +1,32 @@
+CC ?= gcc
+WINDRES ?= windres
+CFLAGS ?= -O2 -Wall -Wextra
+LDFLAGS ?=
+
+BIN2C = bin2c.exe
+TEMPLATE = exelink_template.exe
+TEMPLATE_RES = exelink_template.res
+TEMPLATE_BIN = exelink_template_bin.c
+MKEXELINK = mkexelink.exe
+
+all: $(MKEXELINK)
+
+$(BIN2C): bin2c.c
+	$(CC) $(CFLAGS) -o $@ $<
+
+$(TEMPLATE_RES): exelink_template.rc exelink_config.h empty_config.bin
+	$(WINDRES) exelink_template.rc -O coff -o $@
+
+$(TEMPLATE): exelink_template.c exelink_config.h $(TEMPLATE_RES)
+	$(CC) $(CFLAGS) -municode -o $@ exelink_template.c $(TEMPLATE_RES) $(LDFLAGS)
+
+$(TEMPLATE_BIN): $(BIN2C) $(TEMPLATE)
+	./$(BIN2C) $(TEMPLATE) $@ exelink_template_exe
+
+$(MKEXELINK): mkexelink.c exelink_config.h $(TEMPLATE_BIN)
+	$(CC) $(CFLAGS) -o $@ mkexelink.c $(TEMPLATE_BIN) $(LDFLAGS)
+
+clean:
+	rm -f $(BIN2C) $(TEMPLATE) $(TEMPLATE_RES) $(TEMPLATE_BIN) $(MKEXELINK)
+
+.PHONY: all clean
