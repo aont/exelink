@@ -31,7 +31,6 @@ jobs:
           install: >-
             make
             mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-gcc-libs
 
       - name: Build MSYS2 UCRT64 binary
         shell: msys2 {0}
@@ -46,9 +45,17 @@ jobs:
         with:
           arch: x64
 
+      - name: Build getopt helper for MSVC
+        shell: cmd
+        run: |
+          git clone --depth 1 https://github.com/aont/getopt-msvc-helper.git %RUNNER_TEMP%\getopt-msvc-helper
+          cd /d %RUNNER_TEMP%\getopt-msvc-helper
+          nmake /f Makefile
+
       - name: Build MSVC binary
         shell: cmd
         run: |
+          call %RUNNER_TEMP%\getopt-msvc-helper\setup-env.cmd
           nmake /f Makefile.msvc clean
           nmake /f Makefile.msvc
           move mkexelink.exe mkexelink-msvc-x64.exe
