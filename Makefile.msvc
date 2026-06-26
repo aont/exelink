@@ -1,9 +1,7 @@
 CC = cl
 RC = rc
 CFLAGS = /nologo /O2 /W4 /D_CRT_SECURE_NO_WARNINGS
-GETOPT_DIR = getopt-msvc-helper
-GETOPT_INC = /I$(GETOPT_DIR)
-GETOPT_LIB = $(GETOPT_DIR)\getopt.lib
+GETOPT_LIB = getopt.lib
 
 all: mkexelink.exe
 
@@ -20,7 +18,7 @@ exelink_template_bin.c: bin2c.exe exelink_template.exe
 	bin2c.exe exelink_template.exe $@ exelink_template_exe
 
 mkexelink.exe: mkexelink.c exelink_config.h exelink_template_bin.c
-	$(CC) $(CFLAGS) $(GETOPT_INC) /Fe$@ mkexelink.c exelink_template_bin.c $(GETOPT_LIB)
+	$(CC) $(CFLAGS) /Fe$@ mkexelink.c exelink_template_bin.c $(GETOPT_LIB)
 
 clean:
 	-del /Q bin2c.exe bin2c.obj exelink_template.exe exelink_template.obj exelink_template.res mkexelink.exe mkexelink.obj exelink_template_bin.c exelink_template_bin.obj 2>NUL
