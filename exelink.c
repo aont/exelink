@@ -6,21 +6,23 @@
 #pragma function(memcpy)
 #pragma function(memset)
 
-void* __cdecl memcpy(void* dst, const void* src, size_t n)
+void *__cdecl memcpy(void *dst, const void *src, size_t n)
 {
-    unsigned char* d = (unsigned char*)dst;
-    const unsigned char* s = (const unsigned char*)src;
-    while (n--) {
+    unsigned char *d = (unsigned char *)dst;
+    const unsigned char *s = (const unsigned char *)src;
+    while (n--)
+    {
         *d++ = *s++;
     }
     return dst;
 }
 
-void* __cdecl memset(void* dst, int c, size_t n)
+void *__cdecl memset(void *dst, int c, size_t n)
 {
-    unsigned char* d = (unsigned char*)dst;
+    unsigned char *d = (unsigned char *)dst;
     unsigned char v = (unsigned char)c;
-    while (n--) {
+    while (n--)
+    {
         *d++ = v;
     }
     return dst;
@@ -32,7 +34,8 @@ void* __cdecl memset(void* dst, int c, size_t n)
 static VOID OutputErrorMessageW(LPCWSTR pMessage)
 {
     HANDLE hError = GetStdHandle(STD_ERROR_HANDLE);
-    if (hError == INVALID_HANDLE_VALUE) {
+    if (hError == INVALID_HANDLE_VALUE)
+    {
         return;
     }
     DWORD written = 0;
@@ -52,28 +55,37 @@ static VOID OutputErrorMessageWithCode(LPCWSTR pMessage, DWORD errorCode)
 static LPCWSTR ShiftCommandLine(LPCWSTR pCmdLine)
 {
     BOOL isBackslashPreceding = FALSE;
-    BOOL isInsideDoubleQuote  = FALSE;
-    BOOL isAfterArgv0         = FALSE;
+    BOOL isInsideDoubleQuote = FALSE;
+    BOOL isAfterArgv0 = FALSE;
 
-    for (int i = 0;; i++) {
+    for (int i = 0;; i++)
+    {
         const WCHAR ch = pCmdLine[i];
-        if (isAfterArgv0) {
-            switch (ch) {
+        if (isAfterArgv0)
+        {
+            switch (ch)
+            {
             case L' ':
             case L'\t':
                 break;
             default:
                 return pCmdLine + i;
             }
-        } else if (isInsideDoubleQuote) {
-            switch (ch) {
+        }
+        else if (isInsideDoubleQuote)
+        {
+            switch (ch)
+            {
             case L'\\':
                 isBackslashPreceding = !isBackslashPreceding;
                 break;
             case L'"':
-                if (!isBackslashPreceding) {
+                if (!isBackslashPreceding)
+                {
                     isInsideDoubleQuote = FALSE;
-                } else {
+                }
+                else
+                {
                     isBackslashPreceding = FALSE;
                 }
                 break;
@@ -83,15 +95,21 @@ static LPCWSTR ShiftCommandLine(LPCWSTR pCmdLine)
                 isBackslashPreceding = FALSE;
                 break;
             }
-        } else {
-            switch (ch) {
+        }
+        else
+        {
+            switch (ch)
+            {
             case L'\\':
                 isBackslashPreceding = !isBackslashPreceding;
                 break;
             case L'"':
-                if (!isBackslashPreceding) {
+                if (!isBackslashPreceding)
+                {
                     isInsideDoubleQuote = TRUE;
-                } else {
+                }
+                else
+                {
                     isBackslashPreceding = FALSE;
                 }
                 break;
@@ -112,19 +130,23 @@ static LPCWSTR ShiftCommandLine(LPCWSTR pCmdLine)
 //----------------------------------------------------------
 // Load an embedded resource (RT_RCDATA, given id)
 //----------------------------------------------------------
-static INT LoadEmbeddedResource(INT resourceId, LPVOID* ppResourceData, DWORD* pResourceSize)
+static INT LoadEmbeddedResource(INT resourceId, LPVOID *ppResourceData, DWORD *pResourceSize)
 {
     HRSRC hResourceInfo = FindResourceW(NULL, MAKEINTRESOURCEW(resourceId), MAKEINTRESOURCEW(RT_RCDATA));
-    if (!hResourceInfo) return -1;
+    if (!hResourceInfo)
+        return -1;
 
     HGLOBAL hResourceData = LoadResource(NULL, hResourceInfo);
-    if (!hResourceData) return -1;
+    if (!hResourceData)
+        return -1;
 
     DWORD resourceSize = SizeofResource(NULL, hResourceInfo);
-    if (resourceSize == 0) return -1;
+    if (resourceSize == 0)
+        return -1;
 
     LPVOID pLockRes = LockResource(hResourceData);
-    if (!pLockRes) return -1;
+    if (!pLockRes)
+        return -1;
 
     *ppResourceData = pLockRes;
     *pResourceSize = resourceSize;
@@ -134,7 +156,7 @@ static INT LoadEmbeddedResource(INT resourceId, LPVOID* ppResourceData, DWORD* p
 //----------------------------------------------------------
 // Config blob helpers (type is UTF-16LE 4-WCHAR == 8 bytes)
 //----------------------------------------------------------
-static ULONGLONG ReadU64LE(const BYTE* p)
+static ULONGLONG ReadU64LE(const BYTE *p)
 {
     return ((ULONGLONG)p[0]) |
            ((ULONGLONG)p[1] << 8) |
@@ -146,10 +168,12 @@ static ULONGLONG ReadU64LE(const BYTE* p)
            ((ULONGLONG)p[7] << 56);
 }
 
-static BOOL TypeEquals8(const BYTE* p, const BYTE t[8])
+static BOOL TypeEquals8(const BYTE *p, const BYTE t[8])
 {
-    for (int i = 0; i < 8; i++) {
-        if (p[i] != t[i]) return FALSE;
+    for (int i = 0; i < 8; i++)
+    {
+        if (p[i] != t[i])
+            return FALSE;
     }
     return TRUE;
 }
@@ -159,45 +183,53 @@ static BOOL TypeEquals8(const BYTE* p, const BYTE t[8])
 #define MAX_ENV_VAL_WCHARS 32767
 
 static INT ParseConfigBlobApplyEnvAndGetArgvPrefix(
-    const BYTE* pData,
+    const BYTE *pData,
     DWORD dataSize,
-    const BYTE** ppArgvPrefixBytes,
-    DWORD* pArgvPrefixByteLen
-)
+    const BYTE **ppArgvPrefixBytes,
+    DWORD *pArgvPrefixByteLen)
 {
     // UTF-16LE, 4 WCHAR each:
     // "ARGV" -> A\0 R\0 G\0 V\0
     // "ENV\0" -> E\0 N\0 V\0 \0\0
     // "END\0" -> E\0 N\0 D\0 \0\0
-    static const BYTE TYPE_ARGV[8] = { 'A',0,'R',0,'G',0,'V',0 };
-    static const BYTE TYPE_ENV[8]  = { 'E',0,'N',0,'V',0, 0,0 };
-    static const BYTE TYPE_END[8]  = { 'E',0,'N',0,'D',0, 0,0 };
+    static const BYTE TYPE_ARGV[8] = {'A', 0, 'R', 0, 'G', 0, 'V', 0};
+    static const BYTE TYPE_ENV[8] = {'E', 0, 'N', 0, 'V', 0, 0, 0};
+    static const BYTE TYPE_END[8] = {'E', 0, 'N', 0, 'D', 0, 0, 0};
 
-    const BYTE* p = pData;
+    const BYTE *p = pData;
     ULONGLONG remaining = (ULONGLONG)dataSize;
 
     BOOL hasArgv = FALSE;
     *ppArgvPrefixBytes = NULL;
     *pArgvPrefixByteLen = 0;
 
-    while (remaining >= 8) {
-        const BYTE* pType = p;
-        p += 8; remaining -= 8;
+    while (remaining >= 8)
+    {
+        const BYTE *pType = p;
+        p += 8;
+        remaining -= 8;
 
-        if (TypeEquals8(pType, TYPE_END)) {
+        if (TypeEquals8(pType, TYPE_END))
+        {
             return hasArgv ? 0 : -1;
         }
 
-        if (TypeEquals8(pType, TYPE_ARGV)) {
-            if (remaining < 8) return -1;
+        if (TypeEquals8(pType, TYPE_ARGV))
+        {
+            if (remaining < 8)
+                return -1;
             ULONGLONG len = ReadU64LE(p);
-            p += 8; remaining -= 8;
+            p += 8;
+            remaining -= 8;
 
-            if (len > remaining) return -1;
-            if ((len % 2) != 0) return -1; // UTF-16LE bytes
+            if (len > remaining)
+                return -1;
+            if ((len % 2) != 0)
+                return -1; // UTF-16LE bytes
 
             ULONGLONG wchars = len / 2;
-            if (wchars == 0 || wchars > MAX_CMDLINE_WCHARS) return -1;
+            if (wchars == 0 || wchars > MAX_CMDLINE_WCHARS)
+                return -1;
 
             *ppArgvPrefixBytes = p;
             *pArgvPrefixByteLen = (DWORD)len;
@@ -208,16 +240,22 @@ static INT ParseConfigBlobApplyEnvAndGetArgvPrefix(
             continue;
         }
 
-        if (TypeEquals8(pType, TYPE_ENV)) {
-            if (remaining < 8) return -1;
+        if (TypeEquals8(pType, TYPE_ENV))
+        {
+            if (remaining < 8)
+                return -1;
             ULONGLONG klen = ReadU64LE(p);
-            p += 8; remaining -= 8;
+            p += 8;
+            remaining -= 8;
 
-            if (klen > remaining) return -1;
-            if ((klen % 2) != 0) return -1;
+            if (klen > remaining)
+                return -1;
+            if ((klen % 2) != 0)
+                return -1;
 
             ULONGLONG kchars = klen / 2;
-            if (kchars == 0 || kchars >= MAX_ENV_KEY_WCHARS) return -1;
+            if (kchars == 0 || kchars >= MAX_ENV_KEY_WCHARS)
+                return -1;
 
             WCHAR keyBuf[MAX_ENV_KEY_WCHARS];
             memcpy(keyBuf, p, (SIZE_T)klen);
@@ -226,24 +264,33 @@ static INT ParseConfigBlobApplyEnvAndGetArgvPrefix(
             p += (SIZE_T)klen;
             remaining -= klen;
 
-            if (remaining < 8) return -1;
+            if (remaining < 8)
+                return -1;
             ULONGLONG vlen = ReadU64LE(p);
-            p += 8; remaining -= 8;
+            p += 8;
+            remaining -= 8;
 
-            if (vlen > remaining) return -1;
-            if ((vlen % 2) != 0) return -1;
+            if (vlen > remaining)
+                return -1;
+            if ((vlen % 2) != 0)
+                return -1;
 
             // vlen==0 => set empty string (NOT unset)
-            if (vlen == 0) {
+            if (vlen == 0)
+            {
                 SetEnvironmentVariableW(keyBuf, L"");
-            } else {
+            }
+            else
+            {
                 ULONGLONG vchars = vlen / 2;
-                if (vchars > MAX_ENV_VAL_WCHARS) return -1;
+                if (vchars > MAX_ENV_VAL_WCHARS)
+                    return -1;
 
                 HANDLE hHeap = GetProcessHeap();
                 SIZE_T bytes = (SIZE_T)vlen + sizeof(WCHAR);
                 LPWSTR valueBuf = (LPWSTR)HeapAlloc(hHeap, HEAP_ZERO_MEMORY, bytes);
-                if (!valueBuf) return -1;
+                if (!valueBuf)
+                    return -1;
 
                 memcpy(valueBuf, p, (SIZE_T)vlen);
                 valueBuf[(SIZE_T)vchars] = L'\0';
@@ -272,20 +319,21 @@ int mainCRTStartup(void)
 {
     LPVOID pConfigResource = NULL;
     DWORD configSize = 0;
-    if (LoadEmbeddedResource(101, &pConfigResource, &configSize) != 0) {
+    if (LoadEmbeddedResource(101, &pConfigResource, &configSize) != 0)
+    {
         OutputErrorMessageW(L"LoadEmbeddedResource(101) failed.\r\n");
         return -1;
     }
 
-    const BYTE* pArgvPrefixBytes = NULL;
+    const BYTE *pArgvPrefixBytes = NULL;
     DWORD argvPrefixByteLen = 0;
 
     if (ParseConfigBlobApplyEnvAndGetArgvPrefix(
-            (const BYTE*)pConfigResource,
+            (const BYTE *)pConfigResource,
             configSize,
             &pArgvPrefixBytes,
-            &argvPrefixByteLen
-        ) != 0) {
+            &argvPrefixByteLen) != 0)
+    {
         OutputErrorMessageW(L"ParseConfigBlob failed (invalid config blob).\r\n");
         return -1;
     }
@@ -299,7 +347,8 @@ int mainCRTStartup(void)
 
     HANDLE hProcessHeap = GetProcessHeap();
     LPWSTR pNewCmdLineBuffer = (LPWSTR)HeapAlloc(hProcessHeap, HEAP_ZERO_MEMORY, newCmdLineSize);
-    if (!pNewCmdLineBuffer) {
+    if (!pNewCmdLineBuffer)
+    {
         OutputErrorMessageW(L"HeapAlloc failed.\r\n");
         return -1;
     }
@@ -309,8 +358,7 @@ int mainCRTStartup(void)
     memcpy(
         pNewCmdLineBuffer + (argvPrefixByteLen / sizeof(WCHAR)) + 1,
         pShiftedCmdLine,
-        shiftedCmdLineLength * sizeof(WCHAR)
-    );
+        shiftedCmdLineLength * sizeof(WCHAR));
     pNewCmdLineBuffer[(argvPrefixByteLen / sizeof(WCHAR)) + 1 + shiftedCmdLineLength] = L'\0';
 
     STARTUPINFOW startupInfo;
@@ -330,12 +378,12 @@ int mainCRTStartup(void)
         NULL,
         NULL,
         &startupInfo,
-        &processInfo
-    );
+        &processInfo);
 
     HeapFree(hProcessHeap, 0, pNewCmdLineBuffer);
 
-    if (!isSuccess) {
+    if (!isSuccess)
+    {
         DWORD lastError = GetLastError();
         OutputErrorMessageWithCode(L"CreateProcess failed.", lastError);
         return -1;
