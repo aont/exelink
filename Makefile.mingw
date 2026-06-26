@@ -24,7 +24,7 @@ $(TEMPLATE_BIN): $(BIN2C) $(TEMPLATE)
 	./$(BIN2C) $(TEMPLATE) $@ exelink_template_exe
 
 $(MKEXELINK): mkexelink.c exelink_config.h $(TEMPLATE_BIN)
-	$(CC) $(CFLAGS) -o $@ mkexelink.c $(TEMPLATE_BIN) $(LDFLAGS)
+	$(CC) $(CFLAGS) -municode -o $@ mkexelink.c $(TEMPLATE_BIN) $(LDFLAGS)
 
 clean:
 	rm -f $(BIN2C) $(TEMPLATE) $(TEMPLATE_RES) $(TEMPLATE_BIN) $(MKEXELINK)

@@ -1,6 +1,6 @@
 CC = cl
 RC = rc
-CFLAGS = /nologo /O2 /W4 /D_CRT_SECURE_NO_WARNINGS
+CFLAGS = /nologo /O2 /W4 /DUNICODE /D_CRT_SECURE_NO_WARNINGS
 GETOPT_LIB = getopt.lib
 
 all: mkexelink.exe

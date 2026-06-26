@@ -44,6 +44,52 @@ static int append_u32(unsigned char **b, size_t *l, size_t *c, DWORD v)
     x[3] = (unsigned char)(v >> 24);
     return append_bytes(b, l, c, x, 4);
 }
+
+static char *wide_to_mb(const wchar_t *s)
+{
+    int n = WideCharToMultiByte(CP_UTF8, 0, s, -1, NULL, 0, NULL, NULL);
+    char *m;
+    if (!n)
+        return NULL;
+    m = (char *)malloc((size_t)n);
+    if (!m)
+        return NULL;
+    if (!WideCharToMultiByte(CP_UTF8, 0, s, -1, m, n, NULL, NULL))
+    {
+        free(m);
+        return NULL;
+    }
+    return m;
+}
+
+static void free_mb_argv(char **argv, int argc)
+{
+    int i;
+    if (!argv)
+        return;
+    for (i = 0; i < argc; ++i)
+        free(argv[i]);
+    free(argv);
+}
+
+static char **wide_argv_to_mb_argv(int argc, wchar_t **wargv)
+{
+    char **argv = (char **)calloc((size_t)argc + 1, sizeof(char *));
+    int i;
+    if (!argv)
+        return NULL;
+    for (i = 0; i < argc; ++i)
+    {
+        argv[i] = wide_to_mb(wargv[i]);
+        if (!argv[i])
+        {
+            free_mb_argv(argv, argc);
+            return NULL;
+        }
+    }
+    return argv;
+}
+
 static wchar_t *mb_to_wide(const char *s)
 {
     int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, NULL, 0);
@@ -76,9 +122,10 @@ static int append_wstr(unsigned char **b, size_t *l, size_t *c, const char *s)
     return ok;
 }
 
-int main(int argc, char **argv)
+int wmain(int argc, wchar_t **wargv)
 {
     const char *out = NULL;
+    char **argv = NULL;
     char **envs = NULL;
     int envc = 0, envcap = 0, opt, i;
     unsigned char *cfg = NULL;
@@ -87,6 +134,14 @@ int main(int argc, char **argv)
     HANDLE h;
     BOOL ok;
     wchar_t *wout;
+
+    argv = wide_argv_to_mb_argv(argc, wargv);
+    if (!argv)
+    {
+        fprintf(stderr, "mkexelink: failed to convert command line arguments to UTF-8\n");
+        return 1;
+    }
+    optind = 1;
 
     while ((opt = getopt(argc, argv, "o:e:h")) != -1)
     {
@@ -101,7 +156,11 @@ int main(int argc, char **argv)
                 int nc = envcap ? envcap * 2 : 8;
                 char **ne = (char **)realloc(envs, (size_t)nc * sizeof(char *));
                 if (!ne)
+                {
+                    free(envs);
+                    free_mb_argv(argv, argc);
                     return 1;
+                }
                 envs = ne;
                 envcap = nc;
             }
@@ -110,10 +169,12 @@ int main(int argc, char **argv)
         case 'h':
             usage();
             free(envs);
+            free_mb_argv(argv, argc);
             return 0;
         default:
             usage();
             free(envs);
+            free_mb_argv(argv, argc);
             return 2;
         }
     }
@@ -121,48 +182,82 @@ int main(int argc, char **argv)
     {
         usage();
         free(envs);
+        free_mb_argv(argv, argc);
         return 2;
     }
-    f = fopen(out, "wb");
+    wout = mb_to_wide(out);
+    if (!wout)
+    {
+        free(envs);
+        free_mb_argv(argv, argc);
+        return 1;
+    }
+    f = _wfopen(wout, L"wb");
     if (!f)
     {
         perror(out);
+        free(wout);
         free(envs);
+        free_mb_argv(argv, argc);
         return 1;
     }
     if (fwrite(exelink_template_exe, 1, exelink_template_exe_size, f) != exelink_template_exe_size)
     {
         perror(out);
         fclose(f);
+        free(wout);
         free(envs);
+        free_mb_argv(argv, argc);
         return 1;
     }
     fclose(f);
 
     if (!append_u32(&cfg, &cfg_len, &cfg_cap, EXELINK_CONFIG_MAGIC) || !append_u32(&cfg, &cfg_len, &cfg_cap, EXELINK_CONFIG_VERSION) ||
         !append_u32(&cfg, &cfg_len, &cfg_cap, (DWORD)(argc - optind)) || !append_u32(&cfg, &cfg_len, &cfg_cap, (DWORD)envc))
+    {
+        free(wout);
+        free(envs);
+        free(cfg);
+        free_mb_argv(argv, argc);
         return 1;
+    }
     for (i = optind; i < argc; ++i)
         if (!append_wstr(&cfg, &cfg_len, &cfg_cap, argv[i]))
+        {
+            free(wout);
+            free(envs);
+            free(cfg);
+            free_mb_argv(argv, argc);
             return 1;
+        }
     for (i = 0; i < envc; ++i)
     {
         if (!strchr(envs[i], '=') || envs[i][0] == '=')
         {
             fprintf(stderr, "mkexelink: invalid environment setting: %s\n", envs[i]);
+            free(wout);
+            free(envs);
+            free(cfg);
+            free_mb_argv(argv, argc);
             return 2;
         }
         if (!append_wstr(&cfg, &cfg_len, &cfg_cap, envs[i]))
+        {
+            free(wout);
+            free(envs);
+            free(cfg);
+            free_mb_argv(argv, argc);
             return 1;
+        }
     }
-    wout = mb_to_wide(out);
-    if (!wout)
-        return 1;
     h = BeginUpdateResourceW(wout, FALSE);
     if (!h)
     {
         fprintf(stderr, "mkexelink: BeginUpdateResourceW failed: %lu\n", GetLastError());
         free(wout);
+        free(envs);
+        free(cfg);
+        free_mb_argv(argv, argc);
         return 1;
     }
     ok = UpdateResourceW(h, RT_RCDATA, MAKEINTRESOURCEW(EXELINK_CONFIG_RESOURCE_ID), MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL), cfg, (DWORD)cfg_len);
@@ -170,10 +265,14 @@ int main(int argc, char **argv)
     {
         fprintf(stderr, "mkexelink: resource update failed: %lu\n", GetLastError());
         free(wout);
+        free(envs);
+        free(cfg);
+        free_mb_argv(argv, argc);
         return 1;
     }
     free(wout);
     free(cfg);
     free(envs);
+    free_mb_argv(argv, argc);
     return 0;
 }
