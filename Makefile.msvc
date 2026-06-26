@@ -1,8 +1,9 @@
 # nmake makefile for MSVC.
 
 CC = cl
-PYTHON = python
+CXX = cl
 CFLAGS = /nologo /O2 /utf-8
+CXXFLAGS = /nologo /O2 /EHsc /utf-8
 
 EXELINK_CFLAGS = $(CFLAGS) /GS- /GR- /EHsc- /Zl
 EXELINK_LDFLAGS = /link /NODEFAULTLIB /ENTRY:mainCRTStartup /SUBSYSTEM:CONSOLE /OUT:exelink_template.exe kernel32.lib user32.lib
@@ -13,13 +14,16 @@ all: exelink_template.exe mkexelink.exe
 exelink_template.exe: exelink.c
 	$(CC) $(EXELINK_CFLAGS) exelink.c $(EXELINK_LDFLAGS)
 
-exelink_template.inc: exelink_template.exe tools\bin2c.py
-	$(PYTHON) tools\bin2c.py exelink_template.exe exelink_template_exe exelink_template.inc
+tools\bin2c.exe: tools\bin2c.cpp
+	$(CXX) $(CXXFLAGS) /Fetools\bin2c.exe /Fotools\bin2c.obj tools\bin2c.cpp
+
+exelink_template.inc: exelink_template.exe tools\bin2c.exe
+	tools\bin2c.exe exelink_template.exe exelink_template_exe exelink_template.inc
 
 mkexelink.exe: mkexelink.c exelink_template.inc
 	$(CC) $(CFLAGS) mkexelink.c $(MKEXELINK_LDFLAGS)
 
 clean:
-	-del /q exelink_template.exe mkexelink.exe exelink_template.inc exelink.obj mkexelink.obj 2>NUL
+	-del /q exelink_template.exe mkexelink.exe exelink_template.inc exelink.obj mkexelink.obj tools\bin2c.exe tools\bin2c.obj 2>NUL
 
 .PHONY: all clean
