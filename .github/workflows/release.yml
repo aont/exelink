@@ -1,0 +1,66 @@
+name: Release binaries
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and release Windows binaries
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set release tag
+        id: release_tag
+        shell: bash
+        run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up MSYS2 UCRT64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-gcc-libs
+
+      - name: Build MSYS2 UCRT64 binary
+        shell: msys2 {0}
+        run: |
+          make -f Makefile.mingw clean
+          make -f Makefile.mingw
+          mv mkexelink.exe mkexelink-msys2-ucrt64.exe
+          make -f Makefile.mingw clean
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build MSVC binary
+        shell: cmd
+        run: |
+          nmake /f Makefile.msvc clean
+          nmake /f Makefile.msvc
+          move mkexelink.exe mkexelink-msvc-x64.exe
+          nmake /f Makefile.msvc clean
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.release_tag.outputs.tag }}
+        shell: bash
+        run: |
+          gh release create "$TAG_NAME" \
+            mkexelink-msys2-ucrt64.exe \
+            mkexelink-msvc-x64.exe \
+            --target "$GITHUB_SHA" \
+            --title "$TAG_NAME" \
+            --notes "Automated release for commit $GITHUB_SHA."
