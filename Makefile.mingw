@@ -20,7 +20,7 @@ exelink_template.inc: exelink_template.exe tools/bin2c.exe
 	tools/bin2c.exe exelink_template.exe exelink_template_exe $@
 
 mkexelink.exe: mkexelink.c exelink_template.inc
-	$(CC) $(CFLAGS) -municode -o $@ mkexelink.c -lkernel32 -lshell32
+	$(CC) $(CFLAGS) -nodefaultlibs -nostartfiles -Wl,-e,mainCRTStartup -o $@ mkexelink.c -lkernel32 -lshell32
 
 clean:
 	rm -f exelink_template.exe mkexelink.exe exelink_template.inc tools/bin2c.exe
