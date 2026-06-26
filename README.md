@@ -1,4 +1,4 @@
-# Creating a Minimal Windows “Executable Link” Wrapper
+# Exelink: Creating a Minimal Windows “Executable Link” Wrapper
 
 This project builds two Windows executables:
 
