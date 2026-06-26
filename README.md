@@ -1,7 +1,7 @@
 # Creating a Minimal Windows “Executable Link” Wrapper (RC Version)
 
 This project provides a small Windows utility, **`exelink.exe`**, that behaves like a configurable “link” to another executable.  
-Instead of relying on shortcuts or batch files, it stores launch settings inside the executable as an embedded resource. A companion Python script, **`restool.py`**, reads/writes that embedded configuration.
+Instead of relying on shortcuts or batch files, it stores launch settings inside the executable as an embedded resource. A companion C utility, **`restool.exe`** (built from `restool.c`), reads/writes that embedded configuration.
 
 ## What `exelink.exe` Does
 
@@ -77,9 +77,9 @@ Type values (8 bytes each):
 
 - Marks the end of the blob.
 
-## `restool.py` Interface (INI)
+## `restool.exe` Interface (INI)
 
-`restool.py` reads/writes the config blob stored in `RT_RCDATA 101` and exposes it as an INI file. It uses the Windows profile/INI APIs so Unicode values round-trip through the same Windows APIs used to read and write INI data.
+`restool.exe` reads/writes the config blob stored in `RT_RCDATA 101` and exposes it as an INI file. It uses the Windows profile/INI APIs so Unicode values round-trip through the same Windows APIs used to read and write INI data.
 
 ### INI Schema
 
@@ -102,7 +102,7 @@ Notes:
 * `[env]` maps environment variable names to values.
 * To set an empty string, use `KEY=`.
 * There is **no “unset”** operation.
-* New or empty INI files written by `restool.py` are created as UTF-16LE with a BOM so non-ASCII argv/env values round-trip through the Windows profile APIs.
+* New or empty INI files written by `restool.exe` are created as UTF-16LE with a BOM so non-ASCII argv/env values round-trip through the Windows profile APIs.
 
 ### Commands
 
@@ -111,13 +111,13 @@ Notes:
 Output INI to stdout:
 
 ```cmd
-python restool.py get exelink.exe
+restool get exelink.exe
 ```
 
 Write INI to a file:
 
 ```cmd
-python restool.py get exelink.exe --out config.ini
+restool get exelink.exe --out config.ini
 ```
 
 #### 2) Set configuration
@@ -125,13 +125,13 @@ python restool.py get exelink.exe --out config.ini
 Read INI from a file:
 
 ```cmd
-python restool.py set exelink.exe --in config.ini
+restool set exelink.exe --in config.ini
 ```
 
 Read INI from stdin:
 
 ```cmd
-type config.ini | python restool.py set exelink.exe --in -
+type config.ini | restool set exelink.exe --in -
 ```
 
 ## Running Through the Wrapper
@@ -160,8 +160,24 @@ cl /nologo /O2 /GS- /GR- /EHsc- /Zl /utf-8 exelink.c /link /NODEFAULTLIB /ENTRY:
 gcc -nodefaultlibs -nostartfiles -o exelink.exe exelink.c -lkernel32 -luser32
 ```
 
+## Building `restool.exe`
+
+`restool.exe` uses the Windows resource, profile/INI, and command-line APIs. It intentionally keeps the Python-compatible argv serialization logic in C so the embedded `ARGV` command line can round-trip through `CommandLineToArgvW`.
+
+### MSVC Build
+
+```text
+cl /nologo /O2 /utf-8 restool.c /link /OUT:restool.exe kernel32.lib shell32.lib
+```
+
+### MinGW Build
+
+```text
+gcc -O2 -municode -o restool.exe restool.c -lkernel32 -lshell32
+```
+
 ## Summary
 
 * `exelink.exe` is a minimal Windows launcher that forwards arguments to an embedded argv prefix and applies embedded environment variables.
 * Configuration is stored as a binary record stream in a **single** embedded resource (`RT_RCDATA 101`).
-* `restool.py` reads/writes that configuration using **JSON or TOML**.
+* `restool.exe` reads/writes that configuration using the INI schema above.
