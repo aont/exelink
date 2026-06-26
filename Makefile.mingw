@@ -1,0 +1,18 @@
+# GNU make makefile for MSYS2 UCRT64 MinGW GCC.
+# Run from an MSYS2 UCRT64 shell with the mingw-w64-ucrt-x86_64-gcc toolchain.
+
+CC ?= gcc
+CFLAGS ?= -O2 -Wall -Wextra
+
+.PHONY: all clean
+
+all: exelink.exe restool.exe
+
+exelink.exe: exelink.c
+	$(CC) -nodefaultlibs -nostartfiles -o $@ $< -lkernel32 -luser32
+
+restool.exe: restool.c
+	$(CC) $(CFLAGS) -municode -o $@ $< -lkernel32 -lshell32
+
+clean:
+	rm -f exelink.exe restool.exe
