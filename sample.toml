@@ -1,4 +1,0 @@
-argv = ["C:\\Windows\\System32\\cmd.exe", "/c"]
-
-[env]
-FOO = "bar"
