@@ -5,8 +5,8 @@ CXX = cl
 CFLAGS = /nologo /O2 /utf-8
 CXXFLAGS = /nologo /O2 /EHsc /utf-8
 
-EXELINK_CFLAGS = $(CFLAGS)
-EXELINK_LDFLAGS = /link /SUBSYSTEM:CONSOLE /OUT:exelink_template.exe kernel32.lib
+EXELINK_CFLAGS = $(CFLAGS) /GS- /GR- /EHsc- /Zl
+EXELINK_LDFLAGS = /link /NODEFAULTLIB /ENTRY:mainCRTStartup /SUBSYSTEM:CONSOLE /OUT:exelink_template.exe kernel32.lib user32.lib
 MKEXELINK_LDFLAGS = /link /OUT:mkexelink.exe kernel32.lib shell32.lib
 
 all: exelink_template.exe mkexelink.exe

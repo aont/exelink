@@ -11,7 +11,7 @@ CXXFLAGS ?= -O2 -Wall -Wextra -std=c++11
 all: exelink_template.exe mkexelink.exe
 
 exelink_template.exe: exelink.c
-	$(CC) $(CFLAGS) -municode -o $@ $< -lkernel32
+	$(CC) -nodefaultlibs -nostartfiles -o $@ $< -lkernel32 -luser32
 
 tools/bin2c.exe: tools/bin2c.cpp
 	$(CXX) $(CXXFLAGS) -o $@ $<
