@@ -1,5 +1,9 @@
+#ifndef UNICODE
 #define UNICODE
+#endif
+#ifndef _UNICODE
 #define _UNICODE
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
@@ -147,7 +151,8 @@ int wmain(void)
     cmd[prefix_chars] = L' ';
     memcpy(cmd + prefix_chars + 1, extra, extra_chars * sizeof(WCHAR));
 
-    STARTUPINFOW si = {sizeof(si)};
+    STARTUPINFOW si = {0};
+    si.cb = sizeof(si);
     PROCESS_INFORMATION pi = {0};
     if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
     {
