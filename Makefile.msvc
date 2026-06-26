@@ -5,9 +5,10 @@ CXX = cl
 CFLAGS = /nologo /O2 /utf-8
 CXXFLAGS = /nologo /O2 /EHsc /utf-8
 
-EXELINK_CFLAGS = $(CFLAGS)
-EXELINK_LDFLAGS = /link /SUBSYSTEM:CONSOLE /OUT:exelink_template.exe kernel32.lib
-MKEXELINK_LDFLAGS = /link /OUT:mkexelink.exe kernel32.lib shell32.lib
+EXELINK_CFLAGS = $(CFLAGS) /GS- /GR- /EHsc- /Zl
+EXELINK_LDFLAGS = /link /NODEFAULTLIB /ENTRY:mainCRTStartup /SUBSYSTEM:CONSOLE /OUT:exelink_template.exe kernel32.lib user32.lib
+MKEXELINK_CFLAGS = $(CFLAGS) /GS- /Zl
+MKEXELINK_LDFLAGS = /link /NODEFAULTLIB /ENTRY:mainCRTStartup /SUBSYSTEM:CONSOLE /OUT:mkexelink.exe kernel32.lib shell32.lib
 
 all: exelink_template.exe mkexelink.exe
 
@@ -21,7 +22,7 @@ exelink_template.inc: exelink_template.exe tools\bin2c.exe
 	tools\bin2c.exe exelink_template.exe exelink_template_exe exelink_template.inc
 
 mkexelink.exe: mkexelink.c exelink_template.inc
-	$(CC) $(CFLAGS) mkexelink.c $(MKEXELINK_LDFLAGS)
+	$(CC) $(MKEXELINK_CFLAGS) mkexelink.c $(MKEXELINK_LDFLAGS)
 
 clean:
 	-del /q exelink_template.exe mkexelink.exe exelink_template.inc exelink.obj mkexelink.obj tools\bin2c.exe tools\bin2c.obj 2>NUL
