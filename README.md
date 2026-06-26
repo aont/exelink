@@ -77,81 +77,62 @@ Type values (8 bytes each):
 
 - Marks the end of the blob.
 
-## `restool.py` Interface (JSON/TOML)
+## `restool.py` Interface (INI)
 
-`restool.py` reads/writes the config blob stored in `RT_RCDATA 101`.
+`restool.py` reads/writes the config blob stored in `RT_RCDATA 101` and exposes it as an INI file. It uses the Windows profile/INI APIs so Unicode values round-trip through the same Windows APIs used to read and write INI data.
 
-### Data Model
+### INI Schema
 
-Both JSON and TOML represent the same structure:
+Configuration is represented by two sections:
 
-- `argv`: array of strings (argv prefix)
-- `env`: object/table (map from string to string)
-
-Example (JSON):
-
-```json
-{
-  "argv": ["C:\\Windows\\System32\\cmd.exe", "/c"],
-  "env": {
-    "FOO": "bar"
-  }
-}
-````
-
-Example (TOML):
-
-```toml
-argv = ["C:\\Windows\\System32\\cmd.exe", "/c", ]
+```ini
+[argv]
+0=C:\Windows\System32\cmd.exe
+1=/c
 
 [env]
-FOO = "bar"
+FOO=bar
+EMPTY=
 ```
 
 Notes:
 
-* `argv` is **required** when writing (`set`).
-* `env` is optional; if omitted, it is treated as an empty map.
-* To set an empty string, use `KEY=""` (TOML) or `"KEY": ""` (JSON).
+* `[argv]` numeric keys define the argv prefix. Keys must be contiguous from `0`.
+* For compatibility, `[argv] command_line=...` is also accepted when numeric argv entries are absent.
+* `[env]` maps environment variable names to values.
+* To set an empty string, use `KEY=`.
 * There is **no “unset”** operation.
+* New or empty INI files written by `restool.py` are created as UTF-16LE with a BOM so non-ASCII argv/env values round-trip through the Windows profile APIs.
 
 ### Commands
 
 #### 1) Get current configuration
 
-Output as JSON (default):
+Output INI to stdout:
 
 ```cmd
-python restool.py get exelink.exe --format json
+python restool.py get exelink.exe
 ```
 
-Output as TOML:
+Write INI to a file:
 
 ```cmd
-python restool.py get exelink.exe --format toml
+python restool.py get exelink.exe --out config.ini
 ```
 
 #### 2) Set configuration
 
-Read JSON/TOML from a file:
+Read INI from a file:
 
 ```cmd
-python restool.py set exelink.exe --format json --in config.json
-python restool.py set exelink.exe --format toml --in config.toml
+python restool.py set exelink.exe --in config.ini
 ```
 
-Read from stdin:
+Read INI from stdin:
 
 ```cmd
-type config.json | python restool.py set exelink.exe --format json --in -
-type config.toml | python restool.py set exelink.exe --format toml --in -
+type config.ini | python restool.py set exelink.exe --in -
 ```
-
-### TOML Parsing Requirements
-
-* Python 3.11+ uses `tomllib` (built-in).
-* For Python <= 3.10, TOML parsing requires the third-party module `tomli`.
-* JSON is always available (standard library).
 
 ## Running Through the Wrapper
 
