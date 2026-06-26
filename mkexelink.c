@@ -9,6 +9,8 @@
 #include <wchar.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <getopt.h>
 
 #define CONFIG_RESOURCE_ID 101
 static const BYTE TYPE_ARGV[8] = {'A', 0, 'R', 0, 'G', 0, 'V', 0};
@@ -38,6 +40,64 @@ typedef struct
 } BYTE_BUF;
 
 static void die_last(const wchar_t *msg) { fwprintf(stderr, L"%ls failed. Error=%lu\n", msg, GetLastError()); }
+
+static char *wide_to_utf8(LPCWSTR s)
+{
+    int len = WideCharToMultiByte(CP_UTF8, 0, s, -1, NULL, 0, NULL, NULL);
+    if (len <= 0)
+        return NULL;
+    char *out = (char *)malloc((size_t)len);
+    if (!out)
+        return NULL;
+    if (!WideCharToMultiByte(CP_UTF8, 0, s, -1, out, len, NULL, NULL))
+    {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
+static LPWSTR utf8_to_wide(const char *s)
+{
+    int len = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);
+    if (len <= 0)
+        return NULL;
+    LPWSTR out = (LPWSTR)malloc((size_t)len * sizeof(WCHAR));
+    if (!out)
+        return NULL;
+    if (!MultiByteToWideChar(CP_UTF8, 0, s, -1, out, len))
+    {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
+static void free_utf8_argv(char **argv, int argc)
+{
+    if (!argv)
+        return;
+    for (int i = 0; i < argc; i++)
+        free(argv[i]);
+    free(argv);
+}
+
+static char **make_utf8_argv(int argc, wchar_t **wargv)
+{
+    char **argv = (char **)calloc((size_t)argc + 1, sizeof(char *));
+    if (!argv)
+        return NULL;
+    for (int i = 0; i < argc; i++)
+    {
+        argv[i] = wide_to_utf8(wargv[i]);
+        if (!argv[i])
+        {
+            free_utf8_argv(argv, argc);
+            return NULL;
+        }
+    }
+    return argv;
+}
 static void free_config(ARGV_LIST *a, ENV_MAP *e)
 {
     if (a && a->argv)
@@ -280,34 +340,77 @@ int wmain(int argc, wchar_t **wargv)
 
     LPCWSTR output = wargv[1];
     ENV_MAP env = {0};
-    int command_index = -1;
+    int dashdash_index = -1;
     for (int i = 2; i < argc; i++)
     {
         if (wcscmp(wargv[i], L"--") == 0)
         {
-            command_index = i + 1;
+            dashdash_index = i;
             break;
         }
-        if (wcscmp(wargv[i], L"--env") == 0 && i + 1 < argc)
-        {
-            if (!add_env(&env, wargv[++i]))
-            {
-                free_config(NULL, &env);
-                return 1;
-            }
-            continue;
-        }
+    }
+    if (dashdash_index < 0 || dashdash_index + 1 >= argc)
+    {
         usage();
         free_config(NULL, &env);
         return 2;
     }
 
-    if (command_index < 0 || command_index >= argc)
+    char **argv = make_utf8_argv(argc, wargv);
+    if (!argv)
+        return 1;
+
+    static const struct option long_options[] = {
+        {"env", required_argument, NULL, 'e'},
+        {0, 0, 0, 0},
+    };
+
+    optind = 2;
+    opterr = 0;
+    for (;;)
+    {
+        int opt = getopt_long(dashdash_index + 1, argv, "+e:", long_options, NULL);
+        if (opt == -1)
+            break;
+        switch (opt)
+        {
+        case 'e':
+        {
+            LPWSTR env_spec = utf8_to_wide(optarg);
+            if (!env_spec)
+            {
+                free_utf8_argv(argv, argc);
+                free_config(NULL, &env);
+                return 1;
+            }
+            int ok = add_env(&env, env_spec);
+            free(env_spec);
+            if (!ok)
+            {
+                free_utf8_argv(argv, argc);
+                free_config(NULL, &env);
+                return 1;
+            }
+            break;
+        }
+        default:
+            usage();
+            free_utf8_argv(argv, argc);
+            free_config(NULL, &env);
+            return 2;
+        }
+    }
+
+    if (optind != dashdash_index + 1)
     {
         usage();
+        free_utf8_argv(argv, argc);
         free_config(NULL, &env);
         return 2;
     }
+
+    int command_index = dashdash_index + 1;
+    free_utf8_argv(argv, argc);
 
     ARGV_LIST argv_prefix = {0};
     argv_prefix.argc = argc - command_index;
