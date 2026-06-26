@@ -10,7 +10,7 @@ CFLAGS ?= -O2 -Wall -Wextra
 all: exelink_template.exe mkexelink.exe
 
 exelink_template.exe: exelink.c
-	$(CC) -nodefaultlibs -nostartfiles -o $@ $< -lkernel32 -luser32
+	$(CC) $(CFLAGS) -municode -o $@ $< -lkernel32
 
 exelink_template.inc: exelink_template.exe tools/bin2c.py
 	$(PYTHON) tools/bin2c.py exelink_template.exe exelink_template_exe $@
