@@ -1,28 +1,25 @@
 # nmake makefile for MSVC.
-#
-# restool.exe is linked with getopt.lib for environments that use:
-#   https://github.com/aont/getopt-msvc-helper
-# Make sure MSVC can find the helper before running nmake, for example:
-#   set INCLUDE=%INCLUDE%;C:\path\to\getopt-msvc-helper\include
-#   set LIB=%LIB%;C:\path\to\getopt-msvc-helper\lib
 
 CC = cl
+PYTHON = python
 CFLAGS = /nologo /O2 /utf-8
-GETOPT_LIB = getopt.lib
 
 EXELINK_CFLAGS = $(CFLAGS) /GS- /GR- /EHsc- /Zl
-EXELINK_LDFLAGS = /link /NODEFAULTLIB /ENTRY:mainCRTStartup /SUBSYSTEM:CONSOLE /OUT:exelink.exe kernel32.lib user32.lib
-RESTOOL_LDFLAGS = /link /OUT:restool.exe $(GETOPT_LDFLAGS) kernel32.lib shell32.lib $(GETOPT_LIB)
+EXELINK_LDFLAGS = /link /NODEFAULTLIB /ENTRY:mainCRTStartup /SUBSYSTEM:CONSOLE /OUT:exelink_template.exe kernel32.lib user32.lib
+MKEXELINK_LDFLAGS = /link /OUT:mkexelink.exe kernel32.lib shell32.lib
 
-all: exelink.exe restool.exe
+all: exelink_template.exe mkexelink.exe
 
-exelink.exe: exelink.c
+exelink_template.exe: exelink.c
 	$(CC) $(EXELINK_CFLAGS) exelink.c $(EXELINK_LDFLAGS)
 
-restool.exe: restool.c
-	$(CC) $(CFLAGS) $(GETOPT_CFLAGS) restool.c $(RESTOOL_LDFLAGS)
+exelink_template.inc: exelink_template.exe tools\bin2c.py
+	$(PYTHON) tools\bin2c.py exelink_template.exe exelink_template_exe exelink_template.inc
+
+mkexelink.exe: mkexelink.c exelink_template.inc
+	$(CC) $(CFLAGS) mkexelink.c $(MKEXELINK_LDFLAGS)
 
 clean:
-	-del /q exelink.exe restool.exe exelink.obj restool.obj 2>NUL
+	-del /q exelink_template.exe mkexelink.exe exelink_template.inc exelink.obj mkexelink.obj 2>NUL
 
 .PHONY: all clean

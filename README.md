@@ -1,183 +1,128 @@
-# Creating a Minimal Windows “Executable Link” Wrapper (RC Version)
+# Creating a Minimal Windows “Executable Link” Wrapper
 
-This project provides a small Windows utility, **`exelink.exe`**, that behaves like a configurable “link” to another executable.  
-Instead of relying on shortcuts or batch files, it stores launch settings inside the executable as an embedded resource. A companion C utility, **`restool.exe`** (built from `restool.c`), reads/writes that embedded configuration.
+This project builds two Windows executables:
 
-## What `exelink.exe` Does
+- **`exelink_template.exe`**: a small launcher template that reads an embedded binary configuration resource at runtime.
+- **`mkexelink.exe`**: a generator that contains `exelink_template.exe` as a C byte array, writes a copy to a user-specified output path, and updates that copy's embedded configuration.
 
-`exelink.exe` is a lightweight launcher:
+The previous INI-based configuration tool has been removed. Settings are now supplied directly as `mkexelink.exe` startup arguments.
 
-- It contains an embedded **argv prefix** (e.g., `cmd.exe /c`, `python.exe -E`, etc.).
-- When run, it forwards any additional command-line arguments to that embedded prefix.
-- It executes the target and returns the same exit code, acting as a transparent wrapper.
+## What the Generated Wrapper Does
+
+A generated wrapper is a lightweight launcher:
+
+- It contains an embedded **argv prefix** such as `cmd.exe /c` or `python.exe -E script.py`.
+- When run, it appends any additional command-line arguments to that embedded prefix.
+- It executes the target and returns the same exit code.
 - Optionally, it sets environment variables before launching the child process.
 
-This makes it useful when you want a single `.exe` that always launches a specific program without requiring extra files.
+This is useful when you want a single `.exe` that always launches a specific program without requiring shortcuts, batch files, INI files, or a separate template file at generation time.
 
-## Configuration Storage (Embedded Resource)
+## Generator Interface
 
-Configuration is stored in **one** embedded resource:
+Create a configured wrapper with:
+
+```cmd
+mkexelink OUTPUT [--env KEY=VALUE]... -- COMMAND [ARG...]
+```
+
+Arguments before `--` configure the generated wrapper:
+
+- `OUTPUT`: where to write the generated executable.
+- `--env KEY=VALUE`: environment variable to set before the generated wrapper launches its child process. Repeat as needed. `KEY=` sets an empty string.
+
+Arguments after `--` are serialized as the generated wrapper's embedded argv prefix.
+
+Examples:
+
+```cmd
+mkexelink hello.exe -- cmd.exe /c echo Hello
+mkexelink tool.exe --env FOO=bar --env EMPTY= -- python.exe -E script.py
+```
+
+Once generated, pass additional runtime arguments directly to the generated executable:
+
+```cmd
+hello.exe from-wrapper
+```
+
+The generated wrapper appends `from-wrapper` to its embedded command line.
+
+## Embedded Template
+
+`mkexelink.exe` does not read `exelink_template.exe` from disk at runtime. During the build, `tools/bin2c.py` converts `exelink_template.exe` into `exelink_template.inc`, which is included by `mkexelink.c` as a C array. At generation time, `mkexelink.exe` writes those bytes to `OUTPUT` and then updates `RT_RCDATA` resource id `101` inside that output file.
+
+## Configuration Storage
+
+Configuration is stored in **one** embedded resource in each generated wrapper:
 
 - Resource type: `RT_RCDATA`
 - Resource id: `101`
-- Payload: a binary “config blob” with the record format described below
+- Payload: a binary config blob with the record format described below
 
 ### Record Format
 
-All multi-byte integers are **uint64 little-endian**.  
-All strings are **UTF-16LE bytes** with **no NUL terminator** (lengths are explicit).
+All multi-byte integers are **uint64 little-endian**. All strings are **UTF-16LE bytes** with **no NUL terminator** because lengths are explicit.
 
-Each record begins with a **type field** of exactly **8 bytes**, representing **4 UTF-16LE code units (WCHAR)**.
+Each record begins with an 8-byte type field representing 4 UTF-16LE code units.
 
-Type values (8 bytes each):
+Type values:
 
-- `ARGV` record type: `"ARGV"` as UTF-16LE  
-  Bytes: `A\0 R\0 G\0 V\0`
-- `ENV` record type: `"ENV\0"` as UTF-16LE (4th WCHAR is NUL)  
-  Bytes: `E\0 N\0 V\0 \0\0`
-- `END` record type: `"END\0"` as UTF-16LE  
-  Bytes: `E\0 N\0 D\0 \0\0`
+- `ARGV`: `A\0 R\0 G\0 V\0`
+- `ENV\0`: `E\0 N\0 V\0 \0\0`
+- `END\0`: `E\0 N\0 D\0 \0\0`
 
 #### ARGV record
 
-```
-
+```text
 {type = "ARGV" (UTF-16LE, 8 bytes)}
 {argv_prefix_length: uint64 (bytes)}
 {argv_prefix: argv_prefix_length bytes (UTF-16LE)}
-
 ```
 
-- `argv_prefix` is a **Windows command-line string**, not a null-terminated string.
-- `exelink.exe` uses this as the prefix of the command line it executes.
+`argv_prefix` is a Windows command-line string, not a null-terminated string.
 
 #### ENV record (repeatable)
 
-```
-
+```text
 {type = "ENV\0" (UTF-16LE, 8 bytes)}
 {env_key_length: uint64 (bytes)}
 {env_key: env_key_length bytes (UTF-16LE)}
 {env_value_length: uint64 (bytes)}
 {env_value: env_value_length bytes (UTF-16LE)}
-
 ```
 
-- Environment variables are applied in record order.
-- **Unset is not supported.**
-- If `env_value_length == 0`, it means **set the variable to an empty string**.
+Environment variables are applied in record order. Unset is not supported. An empty value sets the variable to an empty string.
 
 #### END record
 
-```
-
+```text
 {type = "END\0" (UTF-16LE, 8 bytes)}
-
-````
-
-- Marks the end of the blob.
-
-## `restool.exe` Interface (INI)
-
-`restool.exe` reads/writes the config blob stored in `RT_RCDATA 101` and exposes it as an INI file. It uses the Windows profile/INI APIs so Unicode values round-trip through the same Windows APIs used to read and write INI data.
-
-### INI Schema
-
-Configuration is represented by two sections:
-
-```ini
-[argv]
-0=C:\Windows\System32\cmd.exe
-1=/c
-
-[env]
-FOO=bar
-EMPTY=
 ```
 
-Notes:
+Marks the end of the blob.
 
-* `[argv]` numeric keys define the argv prefix. Keys must be contiguous from `0`.
-* For compatibility, `[argv] command_line=...` is also accepted when numeric argv entries are absent.
-* `[env]` maps environment variable names to values.
-* To set an empty string, use `KEY=`.
-* There is **no “unset”** operation.
-* New or empty INI files written by `restool.exe` are created as UTF-16LE with a BOM so non-ASCII argv/env values round-trip through the Windows profile APIs.
-
-### Commands
-
-#### 1) Get current configuration
-
-Output INI to stdout:
-
-```cmd
-restool get exelink.exe
-```
-
-Write INI to a file:
-
-```cmd
-restool get exelink.exe --out config.ini
-```
-
-#### 2) Set configuration
-
-Read INI from a file:
-
-```cmd
-restool set exelink.exe --in config.ini
-```
-
-Read INI from stdin:
-
-```cmd
-type config.ini | restool set exelink.exe --in -
-```
-
-## Running Through the Wrapper
-
-Once configured, you can run via the wrapper and pass normal arguments:
-
-```cmd
-exelink.exe echo %FOO%
-```
-
-`exelink.exe` forwards all additional arguments to the embedded `argv` prefix.
-
-## Building `exelink.exe`
-
-The goal is to produce a minimal executable suitable for this “link” behavior.
+## Building
 
 ### MSVC Build
 
 ```text
-cl /nologo /O2 /GS- /GR- /EHsc- /Zl /utf-8 exelink.c /link /NODEFAULTLIB /ENTRY:mainCRTStartup /SUBSYSTEM:CONSOLE /OUT:exelink.exe kernel32.lib user32.lib
+nmake /f Makefile.msvc
 ```
+
+The MSVC makefile builds `exelink_template.exe`, converts it into `exelink_template.inc`, and then builds `mkexelink.exe`.
 
 ### MinGW Build
 
 ```text
-gcc -nodefaultlibs -nostartfiles -o exelink.exe exelink.c -lkernel32 -luser32
+mingw32-make -f Makefile.mingw
 ```
 
-## Building `restool.exe`
-
-`restool.exe` uses the Windows resource, profile/INI, and command-line APIs. It intentionally keeps the Python-compatible argv serialization logic in C so the embedded `ARGV` command line can round-trip through `CommandLineToArgvW`.
-
-### MSVC Build
-
-```text
-cl /nologo /O2 /utf-8 restool.c /link /OUT:restool.exe kernel32.lib shell32.lib
-```
-
-### MinGW Build
-
-```text
-gcc -O2 -municode -o restool.exe restool.c -lkernel32 -lshell32
-```
+The MinGW makefile performs the same template, C-array, and generator build sequence.
 
 ## Summary
 
-* `exelink.exe` is a minimal Windows launcher that forwards arguments to an embedded argv prefix and applies embedded environment variables.
-* Configuration is stored as a binary record stream in a **single** embedded resource (`RT_RCDATA 101`).
-* `restool.exe` reads/writes that configuration using the INI schema above.
+- `exelink_template.exe` is the original launcher executable renamed as a template.
+- `mkexelink.exe` is the original resource tool renamed and redesigned as a generator.
+- INI file reading/writing has been removed.
+- `mkexelink.exe` embeds the template executable as C data and creates configured wrapper executables at user-specified paths.

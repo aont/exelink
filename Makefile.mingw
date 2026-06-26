@@ -2,17 +2,21 @@
 # Run from an MSYS2 UCRT64 shell with the mingw-w64-ucrt-x86_64-gcc toolchain.
 
 CC ?= gcc
+PYTHON ?= python3
 CFLAGS ?= -O2 -Wall -Wextra
 
 .PHONY: all clean
 
-all: exelink.exe restool.exe
+all: exelink_template.exe mkexelink.exe
 
-exelink.exe: exelink.c
+exelink_template.exe: exelink.c
 	$(CC) -nodefaultlibs -nostartfiles -o $@ $< -lkernel32 -luser32
 
-restool.exe: restool.c
-	$(CC) $(CFLAGS) -municode -o $@ $< -lkernel32 -lshell32
+exelink_template.inc: exelink_template.exe tools/bin2c.py
+	$(PYTHON) tools/bin2c.py exelink_template.exe exelink_template_exe $@
+
+mkexelink.exe: mkexelink.c exelink_template.inc
+	$(CC) $(CFLAGS) -municode -o $@ mkexelink.c -lkernel32 -lshell32
 
 clean:
-	rm -f exelink.exe restool.exe
+	rm -f exelink_template.exe mkexelink.exe exelink_template.inc
