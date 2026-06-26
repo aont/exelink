@@ -50,7 +50,7 @@ The generated wrapper appends `from-wrapper` to its embedded command line.
 
 ## Embedded Template
 
-`mkexelink.exe` does not read `exelink_template.exe` from disk at runtime. During the build, `tools/bin2c.py` converts `exelink_template.exe` into `exelink_template.inc`, which is included by `mkexelink.c` as a C array. At generation time, `mkexelink.exe` writes those bytes to `OUTPUT` and then updates `RT_RCDATA` resource id `101` inside that output file.
+`mkexelink.exe` does not read `exelink_template.exe` from disk at runtime. During the build, `tools/bin2c.cpp` is compiled into a small host utility that converts `exelink_template.exe` into `exelink_template.inc`, which is included by `mkexelink.c` as a C array. At generation time, `mkexelink.exe` writes those bytes to `OUTPUT` and then updates `RT_RCDATA` resource id `101` inside that output file.
 
 ## Configuration Storage
 
@@ -110,7 +110,7 @@ Marks the end of the blob.
 nmake /f Makefile.msvc
 ```
 
-The MSVC makefile builds `exelink_template.exe`, converts it into `exelink_template.inc`, and then builds `mkexelink.exe`.
+The MSVC makefile builds `exelink_template.exe`, builds the C++ `tools\bin2c.exe` converter, converts the template into `exelink_template.inc`, and then builds `mkexelink.exe`.
 
 ### MinGW Build
 
@@ -118,7 +118,7 @@ The MSVC makefile builds `exelink_template.exe`, converts it into `exelink_templ
 mingw32-make -f Makefile.mingw
 ```
 
-The MinGW makefile performs the same template, C-array, and generator build sequence.
+The MinGW makefile performs the same template, C++ converter, C-array, and generator build sequence.
 
 ## Summary
 
