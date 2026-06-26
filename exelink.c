@@ -130,7 +130,7 @@ static int ReadBlob(const BYTE *p, DWORD size, const BYTE **argv, DWORD *argv_by
     return -1;
 }
 
-int wmain(void)
+int main(void)
 {
     LPVOID config;
     DWORD config_size, prefix_bytes, code = 1;

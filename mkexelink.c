@@ -6,6 +6,7 @@
 #endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shellapi.h>
 #include <wchar.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -270,11 +271,20 @@ static void usage(void)
              L"  mkexelink tool.exe --env FOO=bar -- python.exe -E script.py\n");
 }
 
-int wmain(int argc, wchar_t **wargv)
+int main(void)
 {
+    int argc = 0;
+    LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!wargv)
+    {
+        die_last(L"CommandLineToArgvW");
+        return 1;
+    }
+
     if (argc < 4)
     {
         usage();
+        LocalFree(wargv);
         return 2;
     }
 
@@ -293,12 +303,14 @@ int wmain(int argc, wchar_t **wargv)
             if (!add_env(&env, wargv[++i]))
             {
                 free_config(NULL, &env);
+                LocalFree(wargv);
                 return 1;
             }
             continue;
         }
         usage();
         free_config(NULL, &env);
+        LocalFree(wargv);
         return 2;
     }
 
@@ -306,6 +318,7 @@ int wmain(int argc, wchar_t **wargv)
     {
         usage();
         free_config(NULL, &env);
+        LocalFree(wargv);
         return 2;
     }
 
@@ -315,6 +328,7 @@ int wmain(int argc, wchar_t **wargv)
     if (!argv_prefix.argv)
     {
         free_config(NULL, &env);
+        LocalFree(wargv);
         return 1;
     }
     for (int i = 0; i < argv_prefix.argc; i++)
@@ -323,6 +337,7 @@ int wmain(int argc, wchar_t **wargv)
         if (!argv_prefix.argv[i])
         {
             free_config(&argv_prefix, &env);
+            LocalFree(wargv);
             return 1;
         }
     }
@@ -334,6 +349,7 @@ int wmain(int argc, wchar_t **wargv)
 
     free(blob.data);
     free_config(&argv_prefix, &env);
+    LocalFree(wargv);
     if (!ok)
     {
         DeleteFileW(output);
